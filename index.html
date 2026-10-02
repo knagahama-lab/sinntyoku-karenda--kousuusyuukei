@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+:root{--head:#1f3864;--sub:#d9e1f2;--yel:#fff200;--line:#a6a6a6;--bg:#f4f6fa;--ink:#1d1d1f;--mut:#6b7280;--ok:#2e7d32;--warn:#b26a00;--bad:#c62828;--done:#9e9e9e}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Meiryo UI","Hiragino Sans","Yu Gothic UI",sans-serif;font-size:13px;color:var(--ink);background:var(--bg)}
+header.top{display:flex;align-items:center;gap:14px;background:var(--head);color:#fff;padding:8px 14px;flex-wrap:wrap}
+header.top b{font-size:15px}
+#tabs{display:flex;gap:4px}
+#tabs button{background:transparent;color:#cfd8ea;border:1px solid transparent;border-radius:4px;padding:5px 12px;font:inherit;cursor:pointer}
+#tabs button.on{background:#fff;color:var(--head);font-weight:bold}
+#meta{margin-left:auto;font-size:11px;color:#cfd8ea}
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 14px;background:#fff;border-bottom:1px solid #dde}
+.filters label{font-size:12px;color:var(--mut)}
+select,input,textarea,button{font:inherit}
+select,input[type=text],input[type=date],input[type=number]{border:1px solid #c5cbd6;border-radius:4px;padding:4px 6px;background:#fff}
+button.pri{background:var(--head);color:#fff;border:0;border-radius:4px;padding:6px 12px;cursor:pointer}
+button.sec{background:#fff;color:var(--head);border:1px solid var(--head);border-radius:4px;padding:5px 10px;cursor:pointer}
+main{padding:12px 14px}
+.hint{font-size:11px;color:var(--mut)}
+/* ボード */
+.board{display:grid;grid-template-columns:repeat(var(--cols),minmax(220px,1fr));gap:10px;align-items:start}
+.col{background:#e9edf4;border-radius:6px;padding:6px;min-height:200px}
+.col.over{outline:2px dashed var(--head)}
+.col h3{margin:2px 4px 8px;font-size:13px;display:flex;justify-content:space-between}
+.card{background:#fff;border:1px solid #d5dae3;border-left:4px solid #9aa5b8;border-radius:5px;padding:7px 8px;margin-bottom:6px;cursor:grab}
+.card.p-高{border-left-color:var(--bad)}.card.p-中{border-left-color:#e0a100}.card.p-低{border-left-color:#7da7d9}
+.card.dragging{opacity:.4}
+.c-top{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--mut)}
+.c-name{font-weight:bold;margin:3px 0}
+.c-meta,.c-foot{font-size:11px;color:var(--mut)}
+.badge{font-size:10px;padding:1px 6px;border-radius:9px;border:1px solid}
+.j-ok{color:var(--ok);border-color:var(--ok)}.j-warn{color:var(--warn);border-color:var(--warn);background:#fff6e0}
+.j-bad{color:#fff;background:var(--bad);border-color:var(--bad)}.j-done{color:var(--done);border-color:var(--done)}
+.bar{height:5px;background:#e6e9ef;border-radius:3px;overflow:hidden;margin:5px 0 3px}
+.bar i{display:block;height:100%;background:var(--ok)}
+.bar i.over{background:var(--bad)}.bar i.warn{background:#e0a100}
+.overdue{color:var(--bad);font-weight:bold}
+/* ガント */
+.gwrap{overflow:auto;background:#fff;border:1px solid var(--line);max-height:calc(100vh - 150px)}
+.grow{display:flex;min-width:max-content;border-bottom:1px solid #eceff4}
+.glabel{position:sticky;left:0;z-index:2;background:#fff;width:320px;flex:none;padding:4px 8px;border-right:1px solid var(--line);display:flex;gap:6px;align-items:center;white-space:nowrap;overflow:hidden}
+.glabel .nm{overflow:hidden;text-overflow:ellipsis;flex:1}
+.gtl{position:relative;flex:none;height:28px}
+.ghead{position:sticky;top:0;z-index:3;background:var(--head);color:#fff}
+.ghead .glabel{background:var(--head);color:#fff;font-weight:bold}
+.ghead .gtl{height:36px}
+.gday{position:absolute;top:0;height:100%;font-size:10px;text-align:center;border-left:1px solid rgba(255,255,255,.15);padding-top:18px}
+.gmon{position:absolute;top:2px;font-size:11px;font-weight:bold;padding-left:3px;white-space:nowrap}
+.gsec{background:#3a4f7a;color:#fff;font-weight:bold}
+.gsec .glabel{background:#3a4f7a;color:#fff}
+.gbar{position:absolute;top:6px;height:16px;border-radius:3px;background:#7da7d9;overflow:hidden;cursor:pointer;font-size:10px;color:#fff;padding-left:4px;white-space:nowrap}
+.gbar i{position:absolute;left:0;top:0;bottom:0;background:rgba(0,0,0,.22)}
+.gbar span{position:relative}
+.gbar.s-進行中{background:#3f7fd1}.gbar.s-確認待ち{background:#8e6bc2}.gbar.s-完了{background:#a8a8a8}.gbar.bad{background:var(--bad)}
+.gtoday{position:absolute;top:0;bottom:0;width:2px;background:#ff5252;z-index:1}
+/* 表（価格一覧表スタイル） */
+table.pt{border-collapse:collapse;background:#fff;width:100%;font-size:12px}
+table.pt th,table.pt td{border:1px solid var(--line);padding:3px 6px}
+table.pt th{background:var(--head);color:#fff;font-weight:bold;text-align:center}
+table.pt th.s{background:var(--sub);color:#000}
+table.pt td.n{text-align:right;font-variant-numeric:tabular-nums}
+table.pt td.c{text-align:center}
+table.pt td:first-child{white-space:nowrap}
+table.pt tr.sec td{background:#3a4f7a;color:#fff;font-weight:bold}
+table.pt tr.tot td{background:var(--sub);font-weight:bold}
+table.pt .hl{background:var(--yel)}
+.hb{display:flex;align-items:center;gap:6px}
+.hb i{display:inline-block;height:10px;background:#3f7fd1;border-radius:2px}
+.hb i.b{background:#e08a1e}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}
+.panel{background:#fff;border:1px solid #dde;border-radius:6px;padding:10px}
+.panel h4{margin:0 0 8px;font-size:13px;color:var(--head)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:#fff;border:1px solid #dde;border-radius:6px;padding:10px}
+.kpi .v{font-size:22px;font-weight:bold;color:var(--head)}
+.kpi .l{font-size:11px;color:var(--mut)}
+.kpi.alert .v{color:var(--bad)}
+/* 日報 */
+.daily{display:grid;grid-template-columns:minmax(0,3fr) minmax(280px,2fr);gap:14px}
+.daily textarea{width:100%;min-height:160px;border:1px solid #c5cbd6;border-radius:4px;padding:6px}
+pre.sum{white-space:pre-wrap;background:#f7f8fb;border:1px solid #e3e6ee;border-radius:4px;padding:8px;font-family:inherit;font-size:12px;margin:0 0 10px}
+/* モーダル */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:flex-start;justify-content:center;z-index:50;overflow:auto;padding:30px 10px}
+.modal.on{display:flex}
+.mbox{background:#fff;border-radius:8px;width:min(560px,100%);padding:16px}
+.mbox h3{margin:0 0 10px;color:var(--head)}
+.fgrid{display:grid;grid-template-columns:110px 1fr;gap:7px 10px;align-items:center}
+.fgrid input,.fgrid select,.fgrid textarea{width:100%}
+.mfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.idbox{background:#f1f4fa;border:1px dashed #9aa5b8;border-radius:4px;padding:6px 8px;font-size:12px;margin-bottom:10px}
+/* 週カレンダー */
+.week{display:grid;grid-template-columns:44px repeat(7,minmax(90px,1fr));background:#fff;border:1px solid var(--line);overflow:auto;max-height:calc(100vh - 210px)}
+.wk-h{position:sticky;top:0;z-index:3;background:var(--head);color:#fff;text-align:center;font-weight:bold;padding:4px 2px;font-size:12px;border-left:1px solid #3a4f7a}
+.wk-h.today{background:#c62828}
+.wk-h small{display:block;font-weight:normal;font-size:10px;color:#cfd8ea}
+.wk-t{position:relative;border-right:1px solid var(--line)}
+.wk-t div{position:absolute;right:4px;font-size:10px;color:var(--mut);transform:translateY(-6px)}
+.wk-d{position:relative;border-left:1px solid #e3e6ee;background-image:repeating-linear-gradient(180deg,#eceff4 0 1px,transparent 1px 40px)}
+.wk-d.we{background-color:#f7f8fb}
+.ev{position:absolute;border-radius:4px;padding:2px 4px;font-size:10px;line-height:1.25;overflow:hidden;cursor:pointer;border:1px solid rgba(0,0,0,.15);color:#fff}
+.ev b{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev.unc{background:var(--yel)!important;color:#000;border-color:#b8a800}
+.ev.exc{background:repeating-linear-gradient(45deg,#e0e0e0 0 6px,#f2f2f2 6px 12px)!important;color:#666}
+.ev.man{box-shadow:inset 3px 0 0 #111}
+table.pt select{font-size:12px;padding:1px 2px;max-width:200px}
+.acc{font-size:11px;padding:1px 8px;border-radius:9px;border:1px solid;white-space:nowrap}
+.acc-ok{color:var(--ok);border-color:var(--ok)}.acc-ro{color:#1565c0;border-color:#1565c0}.acc-ng{color:#fff;background:var(--bad);border-color:var(--bad)}.acc-na{color:var(--mut);border-color:#bbb}
+.addrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0 12px}
+.info{background:#fffbe6;border:1px solid #f0d36a;border-radius:6px;padding:8px 10px;font-size:12px;margin-bottom:12px;line-height:1.7}
+#toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 14px;border-radius:5px;display:none;z-index:60;font-size:12px}
+#loading{padding:40px;text-align:center;color:var(--mut)}
+@media (max-width:700px){.board{grid-template-columns:1fr}.glabel{width:170px}.daily{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header class="top">
+  <b>工数・タスク管理</b>
+  <nav id="tabs">
+    <button data-v="board" class="on">ボード</button>
+    <button data-v="gantt">ガント</button>
+    <button data-v="dash">予実・工数</button>
+    <button data-v="daily">日報</button>
+    <button data-v="cal">カレンダー</button>
+    <button data-v="admin" id="tabAdmin" hidden>管理</button>
+  </nav>
+  <span id="meta"></span>
+</header>
+<div class="filters" id="filters">
+  <label>担当者</label><select id="fOwner"><option value="">すべて</option></select>
+  <label>部署</label><select id="fDept"><option value="">すべて</option></select>
+  <label>案件</label><select id="fProj"><option value="">すべて</option></select>
+  <input type="text" id="fQ" placeholder="キーワード" size="12">
+  <label><input type="checkbox" id="fDone"> 完了も表示</label>
+  <span style="flex:1"></span>
+  <button class="pri" id="btnNew">＋ タスク追加</button>
+  <button class="sec" id="btnReload">再読込</button>
+</div>
+<main>
+  <div id="loading">読み込み中…</div>
+  <section id="v-board" hidden></section>
+  <section id="v-gantt" hidden></section>
+  <section id="v-dash" hidden>
+    <div class="filters" style="border:1px solid #dde;border-radius:6px;margin-bottom:12px">
+      <label>期間</label>
+      <select id="dPreset"><option value="m0">今月</option><option value="m1">先月</option><option value="w4">直近4週</option><option value="w12">直近12週</option><option value="c">期間指定</option></select>
+      <input type="date" id="dFrom"> 〜 <input type="date" id="dTo">
+      <button class="pri" id="dGo">集計</button>
+      <span class="hint" id="dInfo"></span>
+    </div>
+    <div id="dashBody"></div>
+  </section>
+  <section id="v-daily" hidden>
+    <div class="filters" style="border:1px solid #dde;border-radius:6px;margin-bottom:12px">
+      <label>氏名</label><select id="rName"></select>
+      <button class="sec" id="rPrev">◀ 前日</button>
+      <input type="date" id="rDate">
+      <button class="sec" id="rNext">翌日 ▶</button>
+      <button class="pri" id="rGo">表示</button>
+    </div>
+    <div id="dailyBody"></div>
+  </section>
+  <section id="v-cal" hidden>
+    <div class="filters" style="border:1px solid #dde;border-radius:6px;margin-bottom:12px">
+      <label>氏名</label><select id="cName"></select>
+      <button class="sec" id="cPrev">◀ 前週</button>
+      <button class="sec" id="cThis">今週</button>
+      <button class="sec" id="cNext">翌週 ▶</button>
+      <b id="cRange"></b>
+      <span class="hint" id="cAccess"></span>
+      <span style="flex:1"></span>
+      <button class="pri" id="cNew">＋ 予定を追加</button>
+    </div>
+    <div id="calBody"></div>
+  </section>
+  <section id="v-admin" hidden><div id="adminBody"></div></section>
+</main>
+
+<div class="modal" id="emodal">
+  <div class="mbox">
+    <h3 id="eTitle">予定</h3>
+    <div class="idbox" id="eNote" hidden></div>
+    <div class="fgrid">
+      <label>件名 *</label><input type="text" id="eName">
+      <label>日付</label><input type="date" id="eDate">
+      <label>時間</label><span><input type="time" id="eStart" step="300" style="width:auto"> 〜 <input type="time" id="eEnd" step="300" style="width:auto"></span>
+      <label>説明</label><textarea id="eDesc" rows="3"></textarea>
+      <label>タスク</label><select id="eTask"></select>
+      <label>カテゴリ</label><select id="eCat"></select>
+    </div>
+    <p class="hint">タスク・カテゴリは件名を変えずに予定へ記録され、集計で最優先されます。保存すると参加者への通知は送らず、その日の工数を取り込み直します。</p>
+    <div class="mfoot">
+      <a id="eLink" class="hint" target="_blank" style="margin-right:auto;align-self:center">Googleカレンダーで開く</a>
+      <button class="sec" id="eCancel">キャンセル</button>
+      <button class="pri" id="eSave">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="mbox">
+    <h3 id="mTitle">タスク</h3>
+    <div class="idbox" id="mId" hidden></div>
+    <div class="fgrid">
+      <label>タスク名 *</label><input type="text" id="tName">
+      <label>案件</label><input type="text" id="tProj" list="projList">
+      <label>担当者</label><select id="tOwner"></select>
+      <label>カテゴリ</label><select id="tCat"></select>
+      <label>ステータス</label><select id="tStatus"></select>
+      <label>優先度</label><select id="tPrio"><option>高</option><option selected>中</option><option>低</option></select>
+      <label>開始日</label><input type="date" id="tStart">
+      <label>期限</label><input type="date" id="tDue">
+      <label>予定工数(h)</label><input type="number" id="tPlan" min="0" step="0.5">
+      <label>メモ</label><textarea id="tMemo" rows="3"></textarea>
+    </div>
+    <datalist id="projList"></datalist>
+    <div class="mfoot">
+      <button class="sec" id="mCancel">キャンセル</button>
+      <button class="pri" id="mSave">保存</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+var S = { data: null, view: 'board', editing: null };
+function $(s) { return document.querySelector(s); }
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function api(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (ok, ng) {
+    var r = google.script.run.withSuccessHandler(ok).withFailureHandler(ng);
+    r[fn].apply(r, args);
+  });
+}
+function toast(msg) { var t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(function () { t.style.display = 'none'; }, 3000); }
+function fail(e) { toast('エラー: ' + (e && e.message ? e.message : e)); }
+function h1(x) { return x == null || x === '' ? '-' : (Math.round(x * 10) / 10).toFixed(1); }
+function pct(x) { return x == null ? '-' : Math.round(x * 100) + '%'; }
+function d2s(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function s2d(s) { var p = s.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+function md(s) { if (!s) return ''; var p = s.split('-'); return (+p[1]) + '/' + (+p[2]); }
+function addD(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+function jcls(j) { return { '期限超過': 'j-bad', '工数超過': 'j-bad', '注意': 'j-warn', '完了': 'j-done' }[j] || 'j-ok'; }
+function opts(arr, sel, blank) { return (blank != null ? '<option value="">' + esc(blank) + '</option>' : '') + arr.map(function (v) { return '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join(''); }
+
+// ---------- 起動 ----------
+function load() {
+  return api('getAppData').then(function (d) {
+    S.data = d;
+    $('#loading').hidden = true;
+    $('#meta').textContent = '最終取込: ' + (d.lastImport || '未実行');
+    fillFilters();
+    render();
+  }).catch(function (e) { $('#loading').textContent = '読み込みに失敗しました: ' + (e.message || e); });
+}
+function fillFilters() {
+  var d = S.data, keep = { o: $('#fOwner').value, d: $('#fDept').value, p: $('#fProj').value };
+  var projs = uniq(d.tasks.map(function (t) { return t.proj; }).filter(Boolean));
+  $('#fOwner').innerHTML = opts(d.members.map(function (m) { return m.name; }), keep.o, 'すべて');
+  $('#fDept').innerHTML = opts(d.depts.filter(Boolean), keep.d, 'すべて');
+  $('#fProj').innerHTML = opts(projs, keep.p, 'すべて');
+  $('#projList').innerHTML = projs.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('');
+  $('#tOwner').innerHTML = opts(d.members.map(function (m) { return m.name; }), '', '（未割当）');
+  $('#tCat').innerHTML = opts(d.cats, '', '（未設定）');
+  $('#tStatus').innerHTML = opts(d.statuses);
+  if (!$('#rName').options.length) {
+    $('#rName').innerHTML = opts(d.members.map(function (m) { return m.name; }), d.me);
+    $('#rDate').value = d.today;
+  }
+  var calMembers = d.members.filter(function (m) { return m.calId && (d.isAdmin || m.calId.toLowerCase() === d.viewer); });
+  var keepC = $('#cName').value || (d.members.find(function (m) { return m.name === d.me; }) || {}).calId || '';
+  $('#cName').innerHTML = calMembers.map(function (m) { return '<option value="' + esc(m.calId) + '"' + (m.calId === keepC ? ' selected' : '') + '>' + esc(m.name) + '</option>'; }).join('');
+  $('#tabAdmin').hidden = !d.isAdmin;
+  $('#eCat').innerHTML = '<option value="">（自動判定）</option>' + opts(d.cats);
+}
+function uniq(a) { var o = {}; return a.filter(function (x) { return o[x] ? false : (o[x] = 1); }).sort(); }
+function filtered() {
+  var o = $('#fOwner').value, dp = $('#fDept').value, p = $('#fProj').value, q = $('#fQ').value.trim(), done = $('#fDone').checked;
+  return S.data.tasks.filter(function (t) {
+    if (!done && t.status === '完了') return false;
+    if (o && t.owner !== o) return false;
+    if (dp && t.dept !== dp) return false;
+    if (p && t.proj !== p) return false;
+    if (q && (t.id + t.name + t.proj + t.memo).indexOf(q) < 0) return false;
+    return true;
+  });
+}
+function render() {
+  ['board', 'gantt', 'dash', 'daily', 'cal', 'admin'].forEach(function (v) { $('#v-' + v).hidden = v !== S.view; });
+  document.querySelectorAll('#tabs button').forEach(function (b) { b.classList.toggle('on', b.dataset.v === S.view); });
+  $('#filters').style.display = (S.view === 'board' || S.view === 'gantt' || S.view === 'dash') ? '' : 'none';
+  if (S.view === 'board') renderBoard();
+  if (S.view === 'gantt') renderGantt();
+  if (S.view === 'dash') { if (!S.dash) dashPreset(); else renderDash(); }
+  if (S.view === 'daily') loadDaily();
+  if (S.view === 'cal') loadCal();
+  if (S.view === 'admin') loadAdmin();
+}
+
+// ---------- ボード ----------
+function cardHtml(t) {
+  var rate = t.plan ? t.actual / t.plan : null;
+  var bc = rate == null ? '' : rate > 1 ? 'over' : rate >= 0.8 ? 'warn' : '';
+  var od = t.due && t.status !== '完了' && t.due < S.data.today;
+  return '<div class="card p-' + esc(t.prio) + '" draggable="true" data-id="' + esc(t.id) + '">' +
+    '<div class="c-top"><span>' + esc(t.id) + (t.cat ? ' ・ ' + esc(t.cat) : '') + '</span>' + (t.judge ? '<span class="badge ' + jcls(t.judge) + '">' + esc(t.judge) + '</span>' : '') + '</div>' +
+    '<div class="c-name">' + esc(t.name) + '</div>' +
+    '<div class="c-meta">' + esc(t.proj || '（案件なし）') + ' ・ ' + esc(t.owner || '未割当') + '</div>' +
+    (t.plan ? '<div class="bar"><i class="' + bc + '" style="width:' + Math.min(100, Math.round(rate * 100)) + '%"></i></div>' : '') +
+    '<div class="c-foot">実績 ' + h1(t.actual) + 'h' + (t.plan ? ' / 予定 ' + h1(t.plan) + 'h' : '') +
+    (t.due ? ' ・ <span class="' + (od ? 'overdue' : '') + '">期限 ' + md(t.due) + '</span>' : '') + '</div></div>';
+}
+function renderBoard() {
+  var ts = filtered();
+  var cols = S.data.statuses.filter(function (s) { return s !== '完了' || $('#fDone').checked; });
+  var el = $('#v-board');
+  el.innerHTML = '<p class="hint">カードをドラッグしてステータス変更／クリックで編集。カレンダーの予定に「T-0001」のようにタスクIDを書くと、その時間が実績工数になります。</p>' +
+    '<div class="board" style="--cols:' + cols.length + '">' + cols.map(function (st) {
+      var list = ts.filter(function (t) { return t.status === st; }).sort(function (a, b) { return (a.due || '9') < (b.due || '9') ? -1 : 1; });
+      return '<div class="col" data-status="' + esc(st) + '"><h3><span>' + esc(st) + '</span><span class="hint">' + list.length + '件</span></h3>' + list.map(cardHtml).join('') + '</div>';
+    }).join('') + '</div>';
+}
+function initBoardEvents() {
+  var el = $('#v-board');
+  el.addEventListener('dragstart', function (e) { var c = e.target.closest('.card'); if (!c) return; e.dataTransfer.setData('text/plain', c.dataset.id); c.classList.add('dragging'); });
+  el.addEventListener('dragend', function (e) { var c = e.target.closest('.card'); if (c) c.classList.remove('dragging'); });
+  el.addEventListener('dragover', function (e) { var col = e.target.closest('.col'); if (!col) return; e.preventDefault(); col.classList.add('over'); });
+  el.addEventListener('dragleave', function (e) { var col = e.target.closest('.col'); if (col && !col.contains(e.relatedTarget)) col.classList.remove('over'); });
+  el.addEventListener('drop', function (e) {
+    var col = e.target.closest('.col'); if (!col) return; e.preventDefault(); col.classList.remove('over');
+    var id = e.dataTransfer.getData('text/plain'), st = col.dataset.status;
+    var t = S.data.tasks.find(function (x) { return x.id === id; });
+    if (!t || t.status === st) return;
+    t.status = st; renderBoard();
+    api('updateTask', id, { status: st }).then(function (ts) { S.data.tasks = ts; renderBoard(); toast(id + ' を「' + st + '」に変更しました'); }).catch(function (er) { fail(er); load(); });
+  });
+  el.addEventListener('click', function (e) { var c = e.target.closest('.card'); if (c) openEditor(c.dataset.id); });
+}
+
+// ---------- ガント ----------
+function renderGantt() {
+  var all = filtered(), ts = all.filter(function (t) { return t.start || t.due; });
+  var el = $('#v-gantt');
+  if (!ts.length) { el.innerHTML = '<p class="hint">開始日か期限が入ったタスクがありません。</p>'; return; }
+  var today = s2d(S.data.today), min = addD(today, -7), max = addD(today, 28);
+  ts.forEach(function (t) { var s = s2d(t.start || t.due), e = s2d(t.due || t.start); if (s < min) min = s; if (e > max) max = e; });
+  if ((max - min) / 864e5 > 180) { min = addD(today, -30); max = addD(today, 150); }
+  var W = 26, n = Math.round((max - min) / 864e5) + 1, width = n * W;
+  var k = (6 - min.getDay() + 7) % 7, stops = [];
+  for (var i = 0; i < 7; i++) { var we = i === k || i === (k + 1) % 7; stops.push((we ? '#eef0f5' : 'transparent') + ' ' + (i * W) + 'px ' + ((i + 1) * W) + 'px'); }
+  var bg = 'background-image:repeating-linear-gradient(90deg,transparent 0 ' + (W - 1) + 'px,#e6e9ef ' + (W - 1) + 'px ' + W + 'px),repeating-linear-gradient(90deg,' + stops.join(',') + ');width:' + width + 'px';
+  var todayX = Math.round((today - min) / 864e5) * W + W / 2;
+  var head = '<div class="grow ghead"><div class="glabel">タスク（' + ts.length + '件）</div><div class="gtl" style="width:' + width + 'px">';
+  for (var j = 0; j < n; j++) {
+    var d = addD(min, j);
+    if (j === 0 || d.getDate() === 1) head += '<div class="gmon" style="left:' + (j * W) + 'px">' + d.getFullYear() + '/' + (d.getMonth() + 1) + '</div>';
+    head += '<div class="gday" style="left:' + (j * W) + 'px;width:' + W + 'px;' + (d.getDay() % 6 === 0 ? 'color:#ffb3b3' : '') + '">' + d.getDate() + '</div>';
+  }
+  head += '</div></div>';
+  var groups = {};
+  ts.forEach(function (t) { var g = t.proj || '（案件なし）'; (groups[g] = groups[g] || []).push(t); });
+  var body = Object.keys(groups).sort().map(function (g) {
+    var list = groups[g].sort(function (a, b) { return (a.start || a.due) < (b.start || b.due) ? -1 : 1; });
+    return '<div class="grow gsec"><div class="glabel">■ ' + esc(g) + '（' + list.length + '件）</div><div class="gtl" style="width:' + width + 'px;height:22px"></div></div>' +
+      list.map(function (t) {
+        var s = s2d(t.start || t.due), e = s2d(t.due || t.start);
+        if (e < s) { var tmp = s; s = e; e = tmp; }
+        var x = Math.round((s - min) / 864e5) * W, w = (Math.round((e - s) / 864e5) + 1) * W;
+        var rate = t.plan ? Math.min(1, t.actual / t.plan) : 0;
+        var bad = t.judge === '期限超過' || t.judge === '工数超過';
+        return '<div class="grow"><div class="glabel"><span class="hint">' + esc(t.id) + '</span><span class="nm" title="' + esc(t.name) + '">' + esc(t.name) + '</span><span class="hint">' + esc(t.owner) + '</span>' +
+          (t.judge ? '<span class="badge ' + jcls(t.judge) + '">' + esc(t.judge) + '</span>' : '') + '</div>' +
+          '<div class="gtl" style="' + bg + '"><div class="gtoday" style="left:' + todayX + 'px"></div>' +
+          '<div class="gbar s-' + esc(t.status) + (bad ? ' bad' : '') + '" data-id="' + esc(t.id) + '" style="left:' + x + 'px;width:' + w + 'px" title="' + esc(t.name + ' ' + md(t.start) + '〜' + md(t.due) + ' 実績' + h1(t.actual) + 'h/予定' + h1(t.plan) + 'h') + '">' +
+          '<i style="width:' + Math.round(rate * 100) + '%"></i><span>' + (t.plan ? pct(t.actual / t.plan) : '') + '</span></div></div></div>';
+      }).join('');
+  }).join('');
+  el.innerHTML = '<p class="hint">バーの濃い部分＝実績工数の消化率。赤＝期限超過／工数超過。クリックで編集。' + (all.length > ts.length ? '（日付未設定 ' + (all.length - ts.length) + '件は非表示）' : '') + '</p>' +
+    '<div class="gwrap">' + head + body + '</div>';
+  var wrap = el.querySelector('.gwrap');
+  wrap.scrollLeft = Math.max(0, todayX - 320);
+  wrap.addEventListener('click', function (e) { var b = e.target.closest('.gbar'); if (b) openEditor(b.dataset.id); });
+}
+
+// ---------- 予実・工数 ----------
+function dashPreset() {
+  var p = $('#dPreset').value, t = s2d(S.data.today), f, to = t;
+  if (p === 'm0') f = new Date(t.getFullYear(), t.getMonth(), 1);
+  else if (p === 'm1') { f = new Date(t.getFullYear(), t.getMonth() - 1, 1); to = new Date(t.getFullYear(), t.getMonth(), 0); }
+  else if (p === 'w4') f = addD(t, -27);
+  else if (p === 'w12') f = addD(t, -83);
+  else return;
+  $('#dFrom').value = d2s(f); $('#dTo').value = d2s(to);
+  loadDash();
+}
+function loadDash() {
+  $('#dInfo').textContent = '集計中…';
+  api('getDashboard', $('#dFrom').value, $('#dTo').value).then(function (d) { S.dash = d; $('#dInfo').textContent = '営業日 ' + d.bizDays + '日'; renderDash(); }).catch(fail);
+}
+function hbar(v, max, cls) { return '<span class="hb"><i class="' + (cls || '') + '" style="width:' + (max ? Math.round(v / max * 120) : 0) + 'px"></i>' + h1(v) + '</span>'; }
+function renderDash() {
+  var d = S.dash; if (!d) return;
+  var mf = d.bizDays ? d.monthDays / d.bizDays : 0;
+  var ts = filtered().filter(function (t) { return t.status !== '完了' || $('#fDone').checked; });
+  var cnt = function (j) { return ts.filter(function (t) { return t.judge === j; }).length; };
+  var html = '<div class="kpis">' +
+    '<div class="kpi"><div class="v">' + h1(d.total) + 'h</div><div class="l">総工数（期間）</div></div>' +
+    '<div class="kpi' + (d.total && d.uncl / d.total > 0.2 ? ' alert' : '') + '"><div class="v">' + (d.total ? pct(d.uncl / d.total) : '-') + '</div><div class="l">未分類の割合（20%超は件名ルールの徹底を）</div></div>' +
+    '<div class="kpi' + (cnt('期限超過') ? ' alert' : '') + '"><div class="v">' + cnt('期限超過') + '件</div><div class="l">期限超過タスク</div></div>' +
+    '<div class="kpi' + (cnt('工数超過') ? ' alert' : '') + '"><div class="v">' + cnt('工数超過') + '件</div><div class="l">工数超過タスク</div></div></div>';
+
+  // カテゴリ×部署
+  var mx = Math.max.apply(null, d.cats.map(function (c) { return c.a + c.b + c.o; }).concat([0]));
+  var ta = 0, tb = 0, tt = 0;
+  html += '<div class="grid2"><div class="panel"><h4>業務カテゴリ別 工数</h4><table class="pt"><tr><th rowspan="2">カテゴリ</th><th colspan="3">期間合計（時間）</th><th rowspan="2" class="hl" style="color:#000">' + esc(d.d1) + '<br>月換算</th><th rowspan="2">移管<br>候補</th></tr>' +
+    '<tr><th class="s">' + esc(d.d1) + '</th><th class="s">' + esc(d.d2) + '</th><th class="s">合計</th></tr>' +
+    d.cats.map(function (c) { var t = c.a + c.b + c.o; ta += c.a; tb += c.b; tt += t;
+      return '<tr><td>' + esc(c.cat) + '</td><td class="n">' + h1(c.a) + '</td><td class="n">' + h1(c.b) + '</td><td>' + hbar(t, mx) + '</td><td class="n hl">' + h1(c.a * mf) + '</td><td class="c">' + (c.transfer ? '○' : '') + '</td></tr>'; }).join('') +
+    '<tr class="tot"><td>合計</td><td class="n">' + h1(ta) + '</td><td class="n">' + h1(tb) + '</td><td class="n">' + h1(tt) + '</td><td class="n">' + h1(ta * mf) + '</td><td></td></tr></table></div>';
+
+  // 担当者別
+  var mp = Math.max.apply(null, d.persons.map(function (p) { return p.h; }).concat([0]));
+  html += '<div class="panel"><h4>担当者別 工数</h4><table class="pt"><tr><th>氏名</th><th>部署</th><th>合計(h)</th><th>稼働日</th><th>1日平均</th><th>未分類率</th></tr>' +
+    d.persons.map(function (p) { var ur = p.h ? p.uncl / p.h : 0;
+      return '<tr><td>' + esc(p.name) + '</td><td>' + esc(p.dept) + '</td><td>' + hbar(p.h, mp) + '</td><td class="n">' + p.days + '</td><td class="n">' + h1(p.days ? p.h / p.days : 0) + '</td><td class="n' + (ur > 0.2 ? ' hl' : '') + '">' + pct(ur) + '</td></tr>'; }).join('') +
+    (d.persons.length ? '' : '<tr><td colspan="6" class="c hint">この期間の工数ログがありません（スプレッドシートのメニューから取り込みを実行）</td></tr>') + '</table></div>';
+
+  // 週次推移
+  var mw = Math.max.apply(null, d.weeks.map(function (w) { return w.a + w.b + w.o; }).concat([0]));
+  html += '<div class="panel"><h4>週次推移（' + esc(d.d1) + '＝青／' + esc(d.d2) + '＝橙）</h4><table class="pt"><tr><th>週（月曜）</th><th>' + esc(d.d1) + '</th><th>' + esc(d.d2) + '</th><th>合計</th></tr>' +
+    d.weeks.map(function (w) { var t = w.a + w.b + w.o;
+      return '<tr><td>' + md(w.wk) + '〜</td><td class="n">' + h1(w.a) + '</td><td class="n">' + h1(w.b) + '</td><td><span class="hb"><i style="width:' + (mw ? Math.round(w.a / mw * 140) : 0) + 'px"></i><i class="b" style="width:' + (mw ? Math.round(w.b / mw * 140) : 0) + 'px;margin-left:-6px"></i>' + h1(t) + '</span></td></tr>'; }).join('') + '</table></div>';
+
+  // 案件別
+  var mj = Math.max.apply(null, d.projs.map(function (p) { return p.h; }).concat([0]));
+  html += '<div class="panel"><h4>案件別 工数</h4><table class="pt"><tr><th>案件</th><th>工数(h)</th></tr>' +
+    d.projs.slice(0, 30).map(function (p) { return '<tr><td>' + esc(p.proj) + '</td><td>' + hbar(p.h, mj) + '</td></tr>'; }).join('') + '</table></div></div>';
+
+  // タスク予実
+  var order = ['期限超過', '工数超過', '注意', '順調', '完了'];
+  html += '<div class="panel" style="margin-top:14px"><h4>タスク予実（上の担当者・部署・案件フィルタが効きます）</h4><table class="pt"><tr><th>ID</th><th>タスク</th><th>案件</th><th>担当</th><th>予定(h)</th><th>実績(h)</th><th>消化率</th><th>期限</th><th>判定</th></tr>' +
+    order.map(function (j) {
+      var list = ts.filter(function (t) { return (t.judge || '順調') === j; });
+      if (!list.length) return '';
+      return '<tr class="sec"><td colspan="9">■ ' + j + '（' + list.length + '件）</td></tr>' + list.map(function (t) {
+        var r = t.plan ? t.actual / t.plan : null;
+        return '<tr data-id="' + esc(t.id) + '" style="cursor:pointer"><td class="c">' + esc(t.id) + '</td><td>' + esc(t.name) + '</td><td>' + esc(t.proj) + '</td><td>' + esc(t.owner) + '</td><td class="n">' + h1(t.plan) + '</td><td class="n hl">' + h1(t.actual) + '</td>' +
+          '<td>' + (r == null ? '-' : '<div class="bar" style="width:90px;display:inline-block;vertical-align:middle;margin:0 4px 0 0"><i class="' + (r > 1 ? 'over' : r >= 0.8 ? 'warn' : '') + '" style="width:' + Math.min(100, Math.round(r * 100)) + '%"></i></div>' + pct(r)) + '</td>' +
+          '<td class="c">' + md(t.due) + '</td><td class="c"><span class="badge ' + jcls(t.judge) + '">' + esc(t.judge || '順調') + '</span></td></tr>';
+      }).join('');
+    }).join('') + '</table></div>';
+  $('#dashBody').innerHTML = html;
+}
+
+// ---------- 日報 ----------
+function loadDaily() {
+  var name = $('#rName').value, ymd = $('#rDate').value;
+  if (!name) { $('#dailyBody').innerHTML = '<p class="hint">設定シートにメンバーを登録してください。</p>'; return; }
+  $('#dailyBody').innerHTML = '<p class="hint">読み込み中…</p>';
+  api('getDaily', name, ymd).then(function (d) {
+    var total = d.rows.reduce(function (s, r) { return s + r.h; }, 0);
+    var sum = d.rows.map(function (r) { return r.s + '-' + r.e + ' [' + r.cat + '] ' + r.title; }).join('\n');
+    $('#dailyBody').innerHTML = '<div class="daily"><div class="panel"><h4>' + esc(name) + ' ／ ' + esc(ymd) + ' の業務（カレンダーから自動）</h4>' +
+      '<table class="pt"><tr><th>時間</th><th>h</th><th>カテゴリ</th><th>案件</th><th>タスク</th><th>件名</th></tr>' +
+      d.rows.map(function (r) { return '<tr><td class="c">' + r.s + '-' + r.e + '</td><td class="n">' + h1(r.h) + '</td><td' + (r.cat === '未分類' ? ' class="hl"' : '') + '>' + esc(r.cat) + '</td><td>' + esc(r.proj) + '</td><td class="c">' + esc(r.task) + '</td><td>' + esc(r.title) + '</td></tr>'; }).join('') +
+      (d.rows.length ? '<tr class="tot"><td>合計</td><td class="n">' + h1(total) + '</td><td colspan="4"></td></tr>' : '<tr><td colspan="6" class="c hint">この日の予定は取り込まれていません</td></tr>') + '</table></div>' +
+      '<div class="panel"><h4>日報</h4><pre class="sum">' + esc(sum || '（業務なし）') + '</pre>' +
+      '<label class="hint">所感・明日の予定・相談事項</label><textarea id="rComment" placeholder="良かった点、課題、明日やること など">' + esc(d.comment) + '</textarea>' +
+      '<div class="mfoot"><span class="hint" id="rUpd">' + (d.updated ? '保存済み ' + esc(d.updated) : '未保存') + '</span><button class="pri" id="rSave">日報を保存</button></div></div></div>';
+    $('#rSave').onclick = function () {
+      this.disabled = true;
+      api('saveDaily', name, ymd, $('#rComment').value).then(function (r) { $('#rUpd').textContent = '保存済み ' + r.updated; toast('日報を保存しました'); $('#rSave').disabled = false; }).catch(function (e) { fail(e); $('#rSave').disabled = false; });
+    };
+  }).catch(fail);
+}
+
+// ---------- 編集モーダル ----------
+function openEditor(id) {
+  var t = id ? S.data.tasks.find(function (x) { return x.id === id; }) : null;
+  S.editing = t ? t.id : null;
+  $('#mTitle').textContent = t ? 'タスクを編集' : 'タスクを追加';
+  $('#mId').hidden = !t;
+  if (t) $('#mId').innerHTML = '<b>' + esc(t.id) + '</b> ・ 実績 ' + h1(t.actual) + 'h' + (t.last ? '（最終作業 ' + md(t.last) + '）' : '') + '<br><span class="hint">カレンダー予定の件名か説明に「' + esc(t.id) + '」と書くと、このタスクの実績になります。</span>';
+  $('#tName').value = t ? t.name : '';
+  $('#tProj').value = t ? t.proj : $('#fProj').value;
+  $('#tOwner').value = t ? t.owner : ($('#fOwner').value || S.data.me || '');
+  $('#tCat').value = t ? t.cat : '';
+  $('#tStatus').value = t ? t.status : '未着手';
+  $('#tPrio').value = t ? (t.prio || '中') : '中';
+  $('#tStart').value = t ? t.start : S.data.today;
+  $('#tDue').value = t ? t.due : '';
+  $('#tPlan').value = t && t.plan != null ? t.plan : '';
+  $('#tMemo').value = t ? t.memo : '';
+  $('#modal').classList.add('on');
+  $('#tName').focus();
+}
+function closeEditor() { $('#modal').classList.remove('on'); }
+function saveEditor() {
+  var p = { name: $('#tName').value.trim(), proj: $('#tProj').value.trim(), owner: $('#tOwner').value, cat: $('#tCat').value, status: $('#tStatus').value,
+    prio: $('#tPrio').value, start: $('#tStart').value, due: $('#tDue').value, plan: $('#tPlan').value, memo: $('#tMemo').value };
+  if (!p.name) { toast('タスク名を入力してください'); return; }
+  if (p.start && p.due && p.due < p.start) { toast('期限が開始日より前になっています'); return; }
+  $('#mSave').disabled = true;
+  var call = S.editing ? api('updateTask', S.editing, p).then(function (ts) { return { id: S.editing, tasks: ts }; }) : api('createTask', p);
+  call.then(function (r) { S.data.tasks = r.tasks; closeEditor(); fillFilters(); render(); toast(r.id + ' を保存しました'); })
+    .catch(fail).then(function () { $('#mSave').disabled = false; });
+}
+
+// ---------- カレンダー（予定の確認・修正） ----------
+var WD = ['日', '月', '火', '水', '木', '金', '土'];
+var CAT_COLORS = ['#3f7fd1', '#2e9d6a', '#8e6bc2', '#d1793f', '#c2477a', '#1f9bb0', '#6d8a2f', '#a0662b', '#5a6fd1', '#b0466a', '#3a8f8f', '#7a5bb5', '#c48a1f', '#4b7f52', '#8b5e3c'];
+function catColor(c) { var i = S.data.cats.indexOf(c); return i < 0 ? '#9aa5b8' : CAT_COLORS[i % CAT_COLORS.length]; }
+function accCls(a) { return a === '編集可' ? 'acc-ok' : a === '閲覧のみ' ? 'acc-ro' : (a === '空き時間のみ' || a === 'アクセス不可') ? 'acc-ng' : 'acc-na'; }
+function mins(iso) { return +iso.slice(11, 13) * 60 + +iso.slice(14, 16); }
+function endMin(e) { return e.end.slice(0, 10) > e.start.slice(0, 10) ? 24 * 60 : mins(e.end); }
+function durH(e) { return (endMin(e) - mins(e.start)) / 60; }
+function dayEvents(ds) { return S.cal.events.filter(function (e) { return e.start.slice(0, 10) === ds; }).sort(function (a, b) { return a.start < b.start ? -1 : 1; }); }
+function dayHours(ds) { return dayEvents(ds).filter(function (e) { return !e.excluded; }).reduce(function (s, e) { return s + durH(e); }, 0); }
+function taskOpts(sel) {
+  var ts = S.data.tasks.filter(function (t) { return t.status !== '完了' || t.id === sel; });
+  return '<option value="">（なし）</option>' + ts.map(function (t) { return '<option value="' + esc(t.id) + '"' + (t.id === sel ? ' selected' : '') + '>' + esc(t.id + ' ' + t.name) + '</option>'; }).join('');
+}
+function catOpts(e) {
+  return '<option value="">（自動' + (e.manualCat ? '' : '：' + esc(e.cat)) + '）</option>' + S.data.cats.map(function (c) { return '<option' + (c === e.manualCat ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
+}
+function loadCal() {
+  if (!S.calWeek) S.calWeek = addD(s2d(S.data.today), -((s2d(S.data.today).getDay() + 6) % 7));
+  var f = S.calWeek, t = addD(f, 6), calId = $('#cName').value;
+  $('#cRange').textContent = (f.getMonth() + 1) + '/' + f.getDate() + ' 〜 ' + (t.getMonth() + 1) + '/' + t.getDate();
+  if (!calId) { $('#calBody').innerHTML = '<p class="hint">表示できるメンバーがいません（管理者は「管理」タブで登録。一般メンバーは自分のカレンダーのみ表示）。</p>'; return; }
+  $('#calBody').innerHTML = '<p class="hint">読み込み中…</p>';
+  api('getEvents', calId, d2s(f), d2s(t)).then(function (d) { S.cal = d; renderCal(); })
+    .catch(function (e) { $('#calBody').innerHTML = '<p class="hint">読み込めませんでした: ' + esc(e.message || e) + '</p>'; });
+}
+function renderCal() {
+  var d = S.cal, f = S.calWeek, PX = 40, hs = 8, he = 19;
+  $('#cAccess').innerHTML = 'アクセス: <span class="acc ' + accCls(d.access) + '">' + esc(d.access || '未確認') + '</span>';
+  d.events.forEach(function (e) { hs = Math.min(hs, Math.floor(mins(e.start) / 60)); he = Math.max(he, Math.ceil(endMin(e) / 60)); });
+  var H = (he - hs) * PX, days = [];
+  for (var i = 0; i < 7; i++) days.push(addD(f, i));
+  var html = '<div class="week"><div class="wk-h"></div>';
+  days.forEach(function (x) { var ds = d2s(x); html += '<div class="wk-h' + (ds === S.data.today ? ' today' : '') + '">' + (x.getMonth() + 1) + '/' + x.getDate() + '(' + WD[x.getDay()] + ')<small>' + h1(dayHours(ds)) + 'h</small></div>'; });
+  html += '<div class="wk-t" style="height:' + H + 'px">';
+  for (var h = hs; h < he; h++) html += '<div style="top:' + ((h - hs) * PX) + 'px">' + h + ':00</div>';
+  html += '</div>';
+  days.forEach(function (x) {
+    var evs = dayEvents(d2s(x)), lanes = [];
+    evs.forEach(function (e) {
+      var s = mins(e.start), li = lanes.findIndex(function (end) { return end <= s; });
+      if (li < 0) { li = lanes.length; lanes.push(0); }
+      lanes[li] = endMin(e); e._lane = li;
+    });
+    var n = Math.max(1, lanes.length);
+    html += '<div class="wk-d' + (x.getDay() % 6 === 0 ? ' we' : '') + '" style="height:' + H + 'px">';
+    evs.forEach(function (e) {
+      var s = mins(e.start), top = (s - hs * 60) / 60 * PX, ht = Math.max(16, (endMin(e) - s) / 60 * PX - 2);
+      var cls = e.excluded ? ' exc' : e.cat === '未分類' ? ' unc' : '';
+      if (e.manualTask || e.manualCat) cls += ' man';
+      var tm = e.start.slice(11) + '-' + e.end.slice(11);
+      html += '<div class="ev' + cls + '" data-id="' + esc(e.id) + '" style="top:' + top + 'px;height:' + ht + 'px;left:calc(' + (e._lane * 100 / n) + '% + 2px);width:calc(' + (100 / n) + '% - 4px);background:' + catColor(e.cat) + '" title="' + esc(tm + ' ' + e.title + ' [' + (e.excluded || e.cat) + ']') + '">' +
+        '<b>' + esc(e.title || '（件名なし）') + '</b>' + tm + '<br>' + esc(e.excluded ? '対象外：' + e.excluded : e.cat + (e.task ? ' ' + e.task : '')) + '</div>';
+    });
+    html += '</div>';
+  });
+  html += '</div><p class="hint">色＝カテゴリ／黄色＝未分類／灰色斜線＝集計対象外／左に黒線＝手動で分類済み。予定をクリックで修正。</p>';
+
+  html += '<div class="panel" style="margin-top:10px"><h4>分類の修正（選ぶとすぐ保存・件名は変わりません）</h4><table class="pt"><tr><th>時間</th><th>h</th><th>件名</th><th>カテゴリ</th><th>タスク</th><th>判定方法</th><th></th></tr>';
+  var any = false;
+  days.forEach(function (x) {
+    var ds = d2s(x), evs = dayEvents(ds);
+    if (!evs.length) return;
+    any = true;
+    html += '<tr class="sec"><td colspan="7">■ ' + md(ds) + '(' + WD[x.getDay()] + ')（' + evs.length + '件・' + h1(dayHours(ds)) + 'h）</td></tr>';
+    evs.forEach(function (e) {
+      html += '<tr data-eid="' + esc(e.id) + '"><td class="c">' + e.start.slice(11) + '-' + e.end.slice(11) + '</td><td class="n">' + h1(durH(e)) + '</td><td>' + esc(e.title || '（件名なし）') + '</td>' +
+        (e.excluded ? '<td colspan="3" class="hint">集計対象外（' + esc(e.excluded) + '）</td>' :
+          '<td' + (e.cat === '未分類' ? ' class="hl"' : '') + '><select data-k="cat">' + catOpts(e) + '</select></td><td><select data-k="task">' + taskOpts(e.manualTask || e.task) + '</select></td><td class="c hint">' + esc(e.how) + '</td>') +
+        '<td class="c"><button class="sec" data-k="edit" style="padding:1px 8px">修正</button></td></tr>';
+    });
+  });
+  if (!any) html += '<tr><td colspan="7" class="c hint">この週の予定はありません</td></tr>';
+  $('#calBody').innerHTML = html + '</table></div>';
+}
+function initCalEvents() {
+  var el = $('#calBody');
+  el.addEventListener('click', function (e) {
+    var ev = e.target.closest('.ev'); if (ev) { openEvt(ev.dataset.id); return; }
+    var b = e.target.closest('button[data-k="edit"]'); if (b) openEvt(b.closest('tr').dataset.eid);
+  });
+  el.addEventListener('change', function (e) {
+    var sel = e.target.closest('select[data-k]'); if (!sel) return;
+    var tr = sel.closest('tr'), id = tr.dataset.eid;
+    var p = { cat: tr.querySelector('select[data-k="cat"]').value, task: tr.querySelector('select[data-k="task"]').value };
+    tr.querySelectorAll('select').forEach(function (s) { s.disabled = true; });
+    api('updateEvent', S.cal.calId, id, p).then(function (r) { toast(r.note || '分類を保存しました'); loadCal(); }).catch(function (er) { fail(er); loadCal(); });
+  });
+}
+function openEvt(id) {
+  var e = id ? S.cal.events.find(function (x) { return x.id === id; }) : null;
+  S.evEditing = e ? e.id : null;
+  var multi = e && e.end.slice(0, 10) !== e.start.slice(0, 10), locked = e && (!e.organizer || multi);
+  $('#eTitle').textContent = e ? '予定を修正（' + S.cal.name + '）' : '予定を追加（' + S.cal.name + '）';
+  var wk = d2s(S.calWeek), today = S.data.today;
+  $('#eName').value = e ? e.title : '';
+  $('#eDate').value = e ? e.start.slice(0, 10) : (today >= wk && today <= d2s(addD(S.calWeek, 6)) ? today : wk);
+  $('#eStart').value = e ? e.start.slice(11) : '09:00';
+  $('#eEnd').value = e ? e.end.slice(11) : '10:00';
+  $('#eDesc').value = e ? e.desc : '';
+  $('#eTask').innerHTML = taskOpts(e ? (e.manualTask || e.task) : '');
+  $('#eCat').value = e ? e.manualCat : '';
+  ['#eName', '#eDate', '#eStart', '#eEnd', '#eDesc'].forEach(function (s) { $(s).disabled = !!locked; });
+  $('#eNote').hidden = !locked;
+  $('#eNote').textContent = multi ? '日をまたぐ予定のため、ここでは件名・時間を変更できません（タスク・カテゴリは保存できます）。' : '他の人が主催の予定です。件名・時間は変更できません（タスク・カテゴリは保存できます）。';
+  $('#eLink').hidden = !(e && e.link);
+  if (e && e.link) $('#eLink').href = e.link;
+  $('#emodal').classList.add('on');
+}
+function closeEvt() { $('#emodal').classList.remove('on'); }
+function saveEvt() {
+  var e = S.evEditing ? S.cal.events.find(function (x) { return x.id === S.evEditing; }) : null;
+  var p = { task: $('#eTask').value, cat: $('#eCat').value };
+  if (!$('#eName').disabled) {
+    p.title = $('#eName').value.trim(); p.desc = $('#eDesc').value;
+    p.start = $('#eDate').value + 'T' + $('#eStart').value; p.end = $('#eDate').value + 'T' + $('#eEnd').value;
+    if (!p.title) { toast('件名を入力してください'); return; }
+    if (!$('#eDate').value || !$('#eStart').value || !$('#eEnd').value || p.end <= p.start) { toast('終了は開始より後にしてください'); return; }
+  }
+  $('#eSave').disabled = true;
+  (e ? api('updateEvent', S.cal.calId, e.id, p) : api('createEvent', S.cal.calId, p))
+    .then(function (r) { closeEvt(); toast(r.note || '保存しました（参加者への通知なし）'); loadCal(); })
+    .catch(fail).then(function () { $('#eSave').disabled = false; });
+}
+
+// ---------- 管理（メンバー登録） ----------
+function loadAdmin() { $('#adminBody').innerHTML = '<p class="hint">読み込み中…</p>'; api('getAdminData').then(renderAdmin).catch(fail); }
+function refreshAppData() { api('getAppData').then(function (d) { S.data = d; fillFilters(); }); }
+function renderAdmin(d) {
+  S.admin = d;
+  if (!d.isAdmin) { $('#adminBody').innerHTML = '<p class="hint">管理者のみ利用できます。</p>'; return; }
+  var html = '<div class="info"><b>メンバー側の準備（各自1回だけ）</b>：Googleカレンダー →「設定と共有」→「特定のユーザーまたはグループと共有する」で <b>' + esc(d.owner) + '</b> を追加し、権限を<b>「予定の変更」</b>にしてください。<br>' +
+    '閲覧・集計だけなら「予定の詳細をすべて表示」でもOKです。登録すると自動で接続テストを行い、アクセス状況が表示されます。</div>';
+  html += '<div class="panel"><h4 id="aTitle">メンバーを登録</h4><div class="addrow"><input type="text" id="aName" placeholder="氏名" size="10">' +
+    '<select id="aDept">' + opts(d.depts.filter(Boolean), d.depts[0]) + '</select>' +
+    '<input type="text" id="aMail" placeholder="メールアドレス（Googleアカウント）" size="32">' +
+    '<label><input type="checkbox" id="aOn" checked> 取り込む</label>' +
+    '<button class="pri" id="aSave">登録して接続テスト</button><button class="sec" id="aCancel" hidden>キャンセル</button></div>' +
+    '<table class="pt"><tr><th>氏名</th><th>部署</th><th>メールアドレス</th><th>取込</th><th>アクセス</th><th>最終取込結果</th><th>操作</th></tr>' +
+    d.members.map(function (m) {
+      return '<tr data-row="' + m.row + '"><td>' + esc(m.name) + '</td><td>' + esc(m.dept) + '</td><td>' + esc(m.calId) + '</td><td class="c">' + (m.on ? '○' : '－') + '</td>' +
+        '<td class="c"><span class="acc ' + accCls(m.access) + '">' + esc(m.access || '-') + '</span></td><td class="hint">' + esc(m.result) + '</td>' +
+        '<td style="white-space:nowrap"><button class="sec" data-a="edit">編集</button> <button class="sec" data-a="test">接続テスト</button> <button class="sec" data-a="import">今すぐ取込</button> <button class="sec" data-a="del">削除</button></td></tr>';
+    }).join('') + (d.members.length ? '' : '<tr><td colspan="7" class="c hint">まだメンバーがいません</td></tr>') + '</table></div>';
+  $('#adminBody').innerHTML = html;
+  S.adminRow = 0;
+  $('#aSave').onclick = function () {
+    var p = { row: S.adminRow, name: $('#aName').value.trim(), dept: $('#aDept').value, calId: $('#aMail').value.trim(), on: $('#aOn').checked };
+    var btn = this; btn.disabled = true;
+    api('saveMember', p).then(function (r) { toast('保存しました（アクセス: ' + r.access + '）'); renderAdmin(r.data); refreshAppData(); })
+      .catch(function (e) { fail(e); btn.disabled = false; });
+  };
+  $('#aCancel').onclick = function () { renderAdmin(S.admin); };
+}
+function initAdminEvents() {
+  $('#adminBody').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-a]'); if (!b) return;
+    var row = +b.closest('tr').dataset.row, m = S.admin.members.find(function (x) { return x.row === row; });
+    if (b.dataset.a === 'edit') {
+      S.adminRow = row; $('#aTitle').textContent = 'メンバーを編集：' + m.name;
+      $('#aName').value = m.name; $('#aDept').value = m.dept; $('#aMail').value = m.calId; $('#aOn').checked = m.on;
+      $('#aSave').textContent = '更新して接続テスト'; $('#aCancel').hidden = false; $('#aName').focus();
+      return;
+    }
+    if (b.dataset.a === 'del' && !confirm(m.name + ' を登録から外しますか？（取り込み済みの工数ログは残ります）')) return;
+    b.disabled = true;
+    var call = b.dataset.a === 'test' ? api('testMember', m.calId).then(function (r) { toast(m.name + '：' + r.access); return r.data; })
+      : b.dataset.a === 'import' ? api('importMember', m.calId).then(function (r) { toast(r.msg); return r.data; })
+      : api('removeMember', row).then(function (d) { toast(m.name + ' を外しました'); refreshAppData(); return d; });
+    call.then(renderAdmin).catch(function (er) { fail(er); b.disabled = false; });
+  });
+}
+
+// ---------- イベント ----------
+document.querySelectorAll('#tabs button').forEach(function (b) { b.onclick = function () { S.view = b.dataset.v; render(); }; });
+['#fOwner', '#fDept', '#fProj', '#fDone'].forEach(function (s) { $(s).onchange = render; });
+$('#fQ').oninput = render;
+$('#btnNew').onclick = function () { openEditor(null); };
+$('#btnReload').onclick = function () { S.dash = null; load(); };
+$('#mCancel').onclick = closeEditor;
+$('#mSave').onclick = saveEditor;
+$('#modal').onclick = function (e) { if (e.target === this) closeEditor(); };
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeEditor(); closeEvt(); } });
+$('#cName').onchange = loadCal;
+$('#cPrev').onclick = function () { S.calWeek = addD(S.calWeek, -7); loadCal(); };
+$('#cNext').onclick = function () { S.calWeek = addD(S.calWeek, 7); loadCal(); };
+$('#cThis').onclick = function () { S.calWeek = null; loadCal(); };
+$('#cNew').onclick = function () { if (S.cal) openEvt(null); };
+$('#eCancel').onclick = closeEvt;
+$('#eSave').onclick = saveEvt;
+$('#emodal').onclick = function (e) { if (e.target === this) closeEvt(); };
+initCalEvents();
+initAdminEvents();
+$('#dPreset').onchange = dashPreset;
+$('#dGo').onclick = function () { $('#dPreset').value = 'c'; loadDash(); };
+$('#dashBody').onclick = function (e) { var tr = e.target.closest('tr[data-id]'); if (tr) openEditor(tr.dataset.id); };
+$('#rGo').onclick = loadDaily;
+$('#rName').onchange = loadDaily;
+$('#rDate').onchange = loadDaily;
+$('#rPrev').onclick = function () { $('#rDate').value = d2s(addD(s2d($('#rDate').value), -1)); loadDaily(); };
+$('#rNext').onclick = function () { $('#rDate').value = d2s(addD(s2d($('#rDate').value), 1)); loadDaily(); };
+initBoardEvents();
+load();
+</script>
+</body>
+</html>
