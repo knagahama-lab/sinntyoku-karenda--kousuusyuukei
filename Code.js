@@ -5,15 +5,16 @@
 const SH = { CONF: '設定', TASK: 'タスク', LOG: '工数ログ', SUM: '集計', SIM: '移管シミュレーション', DAILY: '日報' };
 const MEMBER_ROWS = 30, CAT_ROWS = 15, TASK_ROWS_INIT = 200;
 const STATUSES = ['未着手', '進行中', '確認待ち', '完了'];
+const LEVELS = ['大', '中', '小'];
 const TASK_ID_RE = /\b[Tt]-(\d{1,5})\b/;
 const PROJ_RE = /[@＠]([^\s　@＠#＃【】\[\]［］]+)/;
 const CLR = { head: '#1f3864', sub: '#d9e1f2', yel: '#fff200', gry: '#f2f2f2', line: '#808080' };
 // タスクシートの列（1始まり）
-const TC = { id: 1, proj: 2, name: 3, owner: 4, dept: 5, cat: 6, status: 7, prio: 8, start: 9, due: 10, plan: 11, actual: 12, rate: 13, remain: 14, judge: 15, last: 16, memo: 17, calEv: 18 };
-const TASK_HEAD = ['タスクID', '案件', 'タスク名', '担当者', '部署', 'カテゴリ', 'ステータス', '優先度', '開始日', '期限', '予定工数(h)', '実績工数(h)', '消化率', '残工数(h)', '判定', '最終作業日', 'メモ', 'カレンダー予定ID'];
-const LOG_HEAD = ['日付', '開始', '終了', '時間(h)', '氏名', '部署', 'カテゴリ', '案件', 'タスクID', '件名', '判定方法', 'イベントID', 'カレンダーID'];
+const TC = { id: 1, proj: 2, name: 3, owner: 4, dept: 5, cat: 6, status: 7, prio: 8, start: 9, due: 10, plan: 11, actual: 12, rate: 13, remain: 14, judge: 15, last: 16, memo: 17, calEv: 18, parent: 19, level: 20 };
+const TASK_HEAD = ['タスクID', '案件', 'タスク名', '担当者', '部署', 'カテゴリ', 'ステータス', '優先度', '開始日', '期限', '予定工数(h)', '実績工数(h)', '消化率', '残工数(h)', '判定', '最終作業日', 'メモ', 'カレンダー予定ID', '親タスクID', '階層'];
+const LOG_HEAD = ['日付', '開始', '終了', '時間(h)', '氏名', '部署', 'カテゴリ', '案件', 'タスクID', '件名', '判定方法', 'イベントID', 'カレンダーID', '上位タスクID'];
 const DAILY_HEAD = ['日付', '氏名', '合計(h)', '業務内容（カレンダーから自動）', '所感・コメント', '更新日時'];
-const FIELD_COL = { proj: TC.proj, name: TC.name, owner: TC.owner, cat: TC.cat, status: TC.status, prio: TC.prio, start: TC.start, due: TC.due, plan: TC.plan, memo: TC.memo };
+const FIELD_COL = { proj: TC.proj, name: TC.name, owner: TC.owner, cat: TC.cat, status: TC.status, prio: TC.prio, start: TC.start, due: TC.due, plan: TC.plan, memo: TC.memo, parent: TC.parent };
 
 // ================= メニュー =================
 function onOpen() {
@@ -24,6 +25,7 @@ function onOpen() {
     .addItem('全期間を取り込み直す', 'importAll')
     .addSeparator()
     .addItem('タスク用カレンダーを今すぐ同期', 'syncTaskCalendars')
+    .addItem('業務分掌を大・中・小タスクに反映', 'importGyomu')
     .addItem('毎朝6時の自動取り込みをON（タスク同期も）', 'installTrigger')
     .addItem('自動取り込みをOFF', 'removeTrigger')
     .addSeparator()
@@ -115,6 +117,13 @@ function getDashboard(fromStr, toStr) {
     const wk = ymd_(weekStart_(l.date));
     addDept(week[wk] || (week[wk] = { wk: wk, a: 0, b: 0, o: 0 }), l);
   });
+  const parentOf = {};
+  readTasks_().forEach(t => { parentOf[t.id] = t.parent; });
+  const taskHours = {};
+  logs.forEach(l => {
+    let id = l.task, guard = 0;
+    while (id && guard++ < 10) { taskHours[id] = (taskHours[id] || 0) + l.h; id = parentOf[id]; }
+  });
   const order = cfg.cats.map(c => c.name).concat(['未分類']);
   const transfer = {};
   cfg.cats.forEach(c => { transfer[c.name] = c.transfer; });
@@ -125,7 +134,8 @@ function getDashboard(fromStr, toStr) {
     cats: Object.keys(cat).map(k => Object.assign(cat[k], { transfer: !!transfer[k] })).sort((x, y) => pos(x.cat) - pos(y.cat)),
     persons: Object.keys(person).map(k => { const p = person[k]; return { name: p.name, dept: p.dept, h: p.h, uncl: p.uncl, days: Object.keys(p.days).length }; }).sort((a, b) => b.h - a.h),
     projs: Object.keys(proj).map(k => ({ proj: k, h: proj[k] })).sort((a, b) => b.h - a.h),
-    weeks: Object.keys(week).sort().map(k => week[k])
+    weeks: Object.keys(week).sort().map(k => week[k]),
+    taskHours: taskHours
   };
 }
 
@@ -220,7 +230,7 @@ function eventToRow_(ev, mb, cfg, taskMap) {
   if (!(h > 0) || h > 24) return null;
   const c = classifyEvent_(ev, cfg, taskMap);
   const day = new Date(s.getFullYear(), s.getMonth(), s.getDate());
-  return [day, s, e, h, mb.name, mb.dept, c.cat, c.proj, c.taskId, ev.summary || '（非公開の予定）', c.how, ev.id, mb.calId];
+  return [day, s, e, h, mb.name, mb.dept, c.cat, c.proj, c.taskId, ev.summary || '（非公開の予定）', c.how, ev.id, mb.calId, ancestors_(taskMap, c.taskId)];
 }
 
 // 取り込まない理由（空文字＝取り込む）
@@ -579,15 +589,244 @@ function ensureConfigRows_(sh) {
 }
 
 function ensureTaskColumns_(sh) {
-  if (String(sh.getRange(1, TC.calEv).getValue()).trim()) return;
-  head_(sh.getRange(1, TC.calEv), [TASK_HEAD[TC.calEv - 1]]);
-  sh.setColumnWidth(TC.calEv, 160);
-  sh.getRange(1, TC.calEv).setNote('タスク用カレンダーから自動追加されたタスクの予定ID（自動入力・編集しない）');
+  const head = sh.getRange(1, 1, 1, TASK_HEAD.length).getValues()[0];
+  [[TC.calEv, 160, 'タスク用カレンダーから自動追加されたタスクの予定ID（自動入力・編集しない）'],
+   [TC.parent, 85, '上位のタスクID。業務分掌の小タスク・中タスクにぶら下げると、実績が上位にも合算されます'],
+   [TC.level, 50, '大／中／小＝業務分掌から作った定常業務。空欄＝個別タスク']].forEach(x => {
+    if (String(head[x[0] - 1]).trim()) return;
+    head_(sh.getRange(1, x[0]), [TASK_HEAD[x[0] - 1]]);
+    sh.setColumnWidth(x[0], x[1]);
+    sh.getRange(1, x[0]).setNote(x[2]);
+  });
+  const lh = sheet_(SH.LOG).getRange(1, LOG_HEAD.length);
+  if (!String(lh.getValue()).trim()) {
+    head_(lh, [LOG_HEAD[LOG_HEAD.length - 1]]);
+    lh.setNote('このログのタスクの上位（中・大タスク）のID。上位タスクの実績合算に使います');
+  }
+}
+
+// 既存シートの数式を最新版に書き換える（親子合算・定常業務の判定を反映）
+function refreshTaskFormulas_(sh) {
+  const n = Math.max(sh.getLastRow(), TASK_ROWS_INIT + 1) - 1;
+  const f1 = [], f2 = [];
+  for (let r = 2; r < 2 + n; r++) { const f = taskFormulas_(r); f1.push([f.dept]); f2.push(f.tail); }
+  sh.getRange(2, TC.dept, n, 1).setFormulas(f1);
+  sh.getRange(2, TC.actual, n, 5).setFormulas(f2);
+}
+
+function ancestors_(taskMap, id) {
+  const out = [];
+  let t = id ? taskMap[id] : null, guard = 0;
+  while (t && t.parent && guard++ < 10) { out.push(t.parent); t = taskMap[t.parent]; }
+  return out.length ? ',' + out.join(',') + ',' : '';
 }
 
 function stripHtml_(s) {
   return String(s).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+}
+
+// ================= 業務分掌 → 大・中・小タスク =================
+// 出典：営業部_業務分掌_260602.xlsx（営業課の業務。資材購買課・計画業務の一覧と「廃止」は除外）
+// [大タスク, 中タスク, 小タスク, 担当区分, 月間工数{氏名:h}, 新規追加見込{客先:h}, 購買課h, 資材購買課が担当中(1/0), 具体的作業[], 補足]
+const GYOMU_SRC = '営業部_業務分掌_260602';
+const GYOMU = [
+  ["製造側：客先対応","客先窓口","客先定期訪問（製造側）・資料作成・議事録作成含む","営業",{"野村":12.0,"赤羽":20.0,"永浜":4.0},{"コナミ":12.0,"エキサイト":12.0,"ニューギン":12.0},0,0,[],""],
+  ["製造側：客先対応","客先窓口","客先からの連絡1ST対応～旗振り","営業",{"野村":4.0,"赤羽":12.0,"永浜":12.0},{"コナミ":6.0,"エキサイト":6.0,"ニューギン":6.0},0,0,[],""],
+  ["製造側：客先対応","客先窓口","4M変更、EOL対応（藤商事様に対して）","営業",{"丹羽":1.0,"赤羽":8.0,"永浜":8.0},{"コナミ":1.0,"エキサイト":1.0,"ニューギン":1.0},0,0,[],""],
+  ["製造側：客先対応","客先窓口","客先固定資産の確認","営業",{"赤羽":1.0,"永浜":1.0},{},5.0,1,[],"写真等の入手は、現場。指定フォーマットへの落とし込みは営業事務。"],
+  ["製造側：客先対応","客先窓口","営業情報入手・社内展開（フォーキャスト・製造計画）","営業",{"赤羽":5.0,"永浜":5.0},{"コナミ":5.0,"エキサイト":5.0,"ニューギン":5.0},5.0,1,["販売フォーキャスト情報","生産計画","部材発注フォーキャスト情報"],""],
+  ["製造側：客先対応","客先窓口","構成表の入手依頼、編集依頼と社内展開","営業",{"赤羽":4.0,"永浜":3.0},{"コナミ":4.0,"エキサイト":4.0,"ニューギン":4.0},4.0,1,[],""],
+  ["製造側：客先対応","客先窓口","支給品の支給日の確認依頼、引き取り","資材購買",{"赤羽":2.0,"永浜":5.0},{"コナミ":2.0,"エキサイト":2.0,"ニューギン":2.0},8.0,1,[],""],
+  ["製造側：客先対応","客先窓口","各種ビジネス文書の作成（案内・交渉・謝罪・通知）","営業、営業事務",{"丹羽":4.0,"野村":1.0,"赤羽":9.0,"永浜":8.0},{"コナミ":6.0,"エキサイト":6.0,"ニューギン":6.0},0,0,[],""],
+  ["製造側：客先対応","見積もり業務","量産見積り（客先へ提示する、判断）・交渉","営業",{"丹羽":1.0,"野村":1.0,"赤羽":14.0,"永浜":5.0},{"コナミ":8.0,"エキサイト":8.0,"ニューギン":8.0},0,0,["藤商事向け見積書作成"],""],
+  ["製造側：客先対応","見積もり業務","設計見積り（客先へ提示する、判断）・交渉","営業",{"丹羽":1.0,"野村":2.0,"赤羽":12.0,"永浜":5.0},{"コナミ":5.0,"エキサイト":5.0,"ニューギン":5.0},0,0,[],""],
+  ["製造側：客先対応","見積もり業務","契約書の作成/確認/リーガルチェック/交渉　（製造側）","営業",{"野村":1.0},{"コナミ":1.0,"エキサイト":1.0,"ニューギン":1.0},0,0,[],""],
+  ["製造側：客先対応","売上業務","受注管理（注文書の確認や注文催促、ミス修正依頼）","営業事務",{"野村":2.0,"赤羽":5.0,"永浜":4.0},{"コナミ":4.0,"エキサイト":4.0,"ニューギン":4.0},0,1,["修正依頼の試作で開発への依頼は営業で引き取ります"],""],
+  ["製造側：客先対応","売上業務","売上管理（売上処理）←F社製造分のみ","営業事務",{"永浜":4.0},{"コナミ":1.0,"エキサイト":1.0,"ニューギン":1.0},0,1,[],"K10売上入力、受領書と販売管理（出荷金額）の照合"],
+  ["製造側：客先対応","売上業務","請求確認（藤商事様）","営業事務",{"赤羽":1.0,"永浜":2.0},{"コナミ":1.0,"エキサイト":1.0,"ニューギン":1.0},0,1,[],"客先に発行する請求確認書"],
+  ["製造側：客先対応","売上業務","客先出荷調整","営業",{"永浜":4.0},{"コナミ":2.0,"エキサイト":2.0,"ニューギン":2.0},0,1,[],"社内の出荷調整は、計画業務だが、客先窓口対応は営業。"],
+  ["製造側：客先対応","売上業務","客先出荷伝票発行、検収依頼","営業事務",{"永浜":8.0},{"コナミ":0.5,"エキサイト":0.5,"ニューギン":0.5},0,1,[],"仮伝票発行、客先提出。（あと追い伝票発行時）"],
+  ["製造側：客先対応","売上業務","客先検収確認","営業事務",{"赤羽":2.0,"永浜":2.0},{"コナミ":0.25,"エキサイト":0.25,"ニューギン":0.25},0,1,[],""],
+  ["製造側：客先対応","売上業務","入金実績確認","営業事務",{"赤羽":1.0,"永浜":2.0},{"コナミ":0.25,"エキサイト":0.25,"ニューギン":0.25},0,1,[],""],
+  ["製造側：客先対応","支払業務","支払い資料作成","営業",{"赤羽":1.0},{},0,0,[],""],
+  ["製造側：客先対応","販路拡大業務","販路開拓・関係継続（製造側）","営業",{"丹羽":12.0,"野村":6.0,"赤羽":5.0,"永浜":5.0},{},0,0,[],""],
+  ["製造側：客先対応","販路拡大業務","商材セールス(製品）","営業",{"丹羽":12.0,"野村":6.0,"赤羽":6.0,"永浜":6.0},{},0,0,[],""],
+  ["製造側：客先対応","販路拡大業務","資料準備（販促系）","営業",{"野村":8.0,"早瀬":60.0},{},0,0,["DAVINCIパンフレット","商材ﾁﾗｼ","会社紹介","打合せ・提案用資料準備"],""],
+  ["製造側：社内対応","利益計画管理","製造予算立案","営業",{"丹羽":3.0,"野村":1.0,"赤羽":6.0},{},0,0,[],""],
+  ["製造側：社内対応","利益計画管理","利益計画（月毎の確認･修正・実績入力・達成のための呼びかけ）","営業",{"丹羽":8.0,"赤羽":10.0},{},0,0,[],""],
+  ["製造側：社内対応","利益計画管理","製造側戦略立案/シミュレーション","営業",{"丹羽":2.0,"野村":10.0,"赤羽":10.0},{},0,0,[],""],
+  ["製造側：社内対応","利益計画管理","事業別経営会議資料作成","営業",{"丹羽":8.0,"野村":4.0,"赤羽":8.0},{},0,0,[],""],
+  ["製造側：社内対応","マルチ","社内旗振り（受注⇒社内管理⇒成果物納品⇒請求⇒売上）\n※新案件に対して。プロデュース業務ではない。⇒お客様のご要望を社内リソースを使って実現し、成果物を納品する。","営業",{"赤羽":10.0,"早瀬":10.0,"永浜":10.0},{},0,0,[],""],
+  ["製造側：社内対応","マルチ","出張（工場見学・展示会）","営業",{"野村":4.0,"赤羽":2.0},{},0,0,[],""],
+  ["製造側：社内対応","マルチ","全防連","営業",{"赤羽":2.0},{},0,0,[],""],
+  ["製造側：社内対応","マルチ","古物商","営業",{"赤羽":1.0},{},0,0,[],""],
+  ["製造側：社内対応","社内打合せ・その他","来客（商社・ベンダー）","営業",{"野村":2.0,"赤羽":1.0},{},0,0,[],""],
+  ["製造側：社内対応","社内打合せ・その他","製造側社内打ち合わせ","全般",{"野村":32.0,"赤羽":36.0,"永浜":24.0},{},0,0,[],""],
+  ["製造側：社内対応","社内打合せ・その他","初品出荷立ち合い/部材納品・移動","資材購買",{"早瀬":2.0,"永浜":10.0},{},0,0,["見本機/量産 初回納品","試作納品/受取","注残部材納品"],""],
+  ["ソフト側：客先対応","客先窓口","客先定期訪問（ソフト側）・資料作成・議事録作成含む","営業",{"丹羽":8.0,"野村":6.0,"早瀬":8.0},{},0,0,[],""],
+  ["ソフト側：客先対応","客先窓口","客先からの連絡1ST対応～旗振り","営業",{"丹羽":8.0,"野村":10.0,"早瀬":8.0},{},0,0,[],""],
+  ["ソフト側：客先対応","客先窓口","営業情報入手・社内展開（機種情報・業界情報）","営業",{"丹羽":16.0,"野村":10.0,"早瀬":10.0},{},0,0,["藤商事ぱちんこラインナップ確認","藤商事パチスロラインナップ確認"],""],
+  ["ソフト側：客先対応","見積もり業務","開発見積り（客先へ提示する、判断）・交渉（打合せ・電話・メール）","営業",{"丹羽":2.0,"野村":22.0,"早瀬":12.0},{},0,0,["藤商事向け見積書作成","見積交渉"],""],
+  ["ソフト側：客先対応","見積もり業務","契約書の作成/確認/リーガルチェック/交渉　（開発側）","営業",{"丹羽":3.0,"野村":4.0,"早瀬":10.0},{},0,0,["フィールズ様保守契約"],""],
+  ["ソフト側：客先対応","見積もり業務","契約業務","営業、営業事務",{"丹羽":3.0,"野村":4.0,"早瀬":1.0,"田中沙":5.0},{},0,0,["契約申請","管理表反映","契約書保管(Redmine)","契約書保管(フォルダ)","契約書保管(総務提出分)","ドキュサイン"],""],
+  ["ソフト側：客先対応","売上業務","日報コード作成","営業事務",{"野村":0.5,"田中沙":3.0},{},0,0,["コード取得","勤次郎コード登録","総務へ紐づけ依頼","管理表3種・フォルダに反映"],""],
+  ["ソフト側：客先対応","売上業務","販売管理（工数集計・社外開発費管理）","営業事務",{"野村":8.0,"早瀬":5.0,"田中沙":10.0},{},0,0,["工数集計（人別も）","経理工数報告書の作成・回覧"],""],
+  ["ソフト側：客先対応","売上業務","売上管理（売上処理）〔F社・D社・FIS社・開発製品・回路設計・業務保守・ロイヤリティ・アプリ・ゲーム〕","営業事務",{"丹羽":16.0,"野村":4.0,"田中沙":35.0},{},0,0,["納品書・請求書の発行回覧・フォルダ保管","K10売上入力","納品書請求書・納品物の発送","納品物の準備依頼","販売台数報告の押印回覧・売上処理"],""],
+  ["ソフト側：客先対応","売上業務","客先検収確認","営業事務",{"野村":0.5,"早瀬":1.0,"田中沙":1.0},{},0,0,["受領書の押印依頼","受領書フォルダ保管"],""],
+  ["ソフト側：客先対応","売上業務","入金実績確認","営業事務",{"野村":1.0,"田中沙":1.0},{},0,0,["F社D社フィールズ入金額照合","承認回覧・保管"],""],
+  ["ソフト側：客先対応","支払業務","支払い資料作成","営業",{"丹羽":8.0},{},0,0,[],""],
+  ["ソフト側：客先対応","支払業務","支払依頼（外注費）","営業事務",{"丹羽":1.0,"野村":1.0,"早瀬":1.0,"田中沙":3.0},{},0,0,["外注費支払処理"],""],
+  ["ソフト側：客先対応","販路拡大業務","販路開拓・関係継続（開発側）","営業",{"丹羽":16.0},{},0,0,[],""],
+  ["ソフト側：客先対応","販路拡大業務","商材セールス","営業",{"丹羽":4.0},{},0,0,[],""],
+  ["ソフト側：客先対応","販路拡大業務","戦略立案/シミュレーション","営業",{"丹羽":4.0,"野村":2.0},{},0,0,[],""],
+  ["ソフト側：社内対応","利益計画管理","開発予算立案（ソフト）","営業",{"丹羽":3.0,"野村":12.0},{},0,0,[],""],
+  ["ソフト側：社内対応","利益計画管理","利益計画（月毎の確認･修正・実績入力・達成のための呼びかけ）","営業",{"丹羽":8.0,"野村":20.0,"早瀬":5.0},{},0,0,["社内資料の整備含む"],""],
+  ["ソフト側：社内対応","利益計画管理","事業別経営会議資料作成","営業",{"丹羽":8.0,"野村":2.0},{},0,0,[],""],
+  ["ソフト側：社内対応","利益計画管理","社外発注用稟議起案＆却下判断・見積もり精査","営業",{"丹羽":8.0,"野村":4.0},{},0,0,[],""],
+  ["ソフト側：社内対応","利益計画管理","社外開発検収管理（検査結果報告書など）","営業事務",{"丹羽":2.0,"野村":0.5,"田中沙":10.0},{},0,0,["外注検査結果送付","検査結果の保管","支払処理","検収と請求の進捗確認"],""],
+  ["ソフト側：社内対応","社内打合せ・その他","監査","営業、営業事務",{"野村":0.5,"田中沙":1.0},{},0,0,[],""],
+  ["ソフト側：社内対応","社内打合せ・その他","外注打合せ（来客・Web）","営業",{"田中沙":5.0},{},0,0,[],""],
+  ["ソフト側：社内対応","社内打合せ・その他","社内打ち合わせ","営業",{"丹羽":4.0,"野村":4.0,"早瀬":4.0,"田中沙":5.0},{},0,0,[],""],
+  ["ソフト側：社内対応","社内打合せ・その他","開発の業務の手伝い","営業",{"野村":2.0,"早瀬":20.0},{},0,0,[],""],
+  ["出張対応","出張","東京などへの出張","営業",{"丹羽":12.0,"野村":12.0,"早瀬":12.0},{},0,0,[],""],
+  ["事業部内共通業務","総務・事務","クレカ対応","",{"田中沙":3.0},{},0,0,["購入サイト登録","購入直前画面押印依頼","購入手続き","購入確定画面押印依頼","適格請求書ダウンロード","PDF結合フォルダ保管","支払処理の添付資料依頼とチェック"],""],
+  ["事業部内共通業務","総務・事務","社用車管理","",{"田中沙":3.0},{},0,0,["車両選定","稟議申請","契約申請","契約書類のやり取り","タイヤ交換","点検対応","修理・支払対応"],"運転日報補充"],
+  ["事業部内共通業務","総務・事務","消耗品","",{"田中沙":2.0},{},0,0,["在庫チェック","稟議と購入","補充・配布"],""],
+  ["事業部内共通業務","総務・事務","支払処理","",{"田中沙":3.0},{},0,0,["毎月処理分","依頼分"],""],
+  ["事業部内共通業務","総務・事務","その他事務","営業事務",{"永浜":7.0,"田中沙":10.0},{},0,0,["購読本管理","管理シール発行","荷物発送","送り状補充","郵便物配布","代理押印と回覧","契約書保管"],""],
+  ["事業部内共通業務","アプリ・ゲーム・ロイヤリティ","アプリ（Apple/Google)国内外4種","営業事務",{"田中沙":3.0},{},0,0,["データ保存","手数料相殺処理","K10売上処理","入金自実績確認"],""],
+  ["事業部内共通業務","アプリ・ゲーム・ロイヤリティ","アプリ四半期（１社は毎月対応）","営業事務",{"田中沙":10.0},{},0,0,["PDF結合","印章申請","実績報告書の送付(13社)","支払処理(支払発生全て）","客先メールのやり取り"],""],
+  ["事業部内共通業務","アプリ・ゲーム・ロイヤリティ","ゲーム（各国分7件）","営業、営業事務",{"田中沙":5.0},{},0,0,["データ保存","相殺処理","売上入力・回覧","分配金の支払処理"],""],
+  ["事業部内共通業務","知財","＋１知財活動","開発",{"丹羽":1.0,"田中沙":5.0},{},0,0,["活動内容検討と案内","アイデア選別","客先ヒアリング対応","明細書確認依頼","譲渡確認書処理","発明届出書作成","知財アイデア説明会"],"特許補償金の売上・請求書発行"],
+  ["事業部内共通業務","営業システム","営業用システム構築・ルール検討","営業、営業事務",{"野村":4.0,"早瀬":10.0,"永浜":42.0},{},0,0,["予実管理修正","楽楽販売構築・修正/メンテナンス","見積書/注文書管理システム"],""],
+  ["事業部内共通業務","総務・事務","固定資産の確認（社内）","",{"田中沙":2.0},{},0,0,[],""],
+  ["事業部内共通業務","総務・事務","固定資産の確認（協力企業）","",{},{},0,0,[],""]
+];
+const GYOMU_OTHER = ['その他', 'その他', 'その他（上記に当てはまらない業務）', '', {}, {}, 0, 0, [], '業務分掌のどれにも当てはまらない仕事はここに付けてください'];
+// 中タスク＝集計カテゴリ。並び順＝キーワード判定の優先順
+const GYOMU_CATS = [
+  ['客先窓口', '訪問,客先,問合せ,問い合わせ,議事録,4M,EOL,構成表,フォーキャスト,支給品', '×'],
+  ['見積もり業務', '見積,契約,リーガル,ドキュサイン', '×'],
+  ['売上業務', '受注,注文,売上,請求,出荷,検収,入金,販売管理,納品,日報コード', '○'],
+  ['支払業務', '支払,外注費', '×'],
+  ['販路拡大業務', '販路,セールス,商談,販促,パンフ,展示会,提案', '×'],
+  ['利益計画管理', '予算,利益計画,経営会議,戦略,稟議,シミュレーション', '×'],
+  ['マルチ', '旗振り,全防連,古物商', '×'],
+  ['社内打合せ・その他', '打合せ,打ち合わせ,会議,MTG,ミーティング,定例,来客,監査', '×'],
+  ['出張', '出張', '×'],
+  ['総務・事務', 'クレカ,社用車,消耗品,郵便,押印,固定資産,発送', '×'],
+  ['アプリ・ゲーム・ロイヤリティ', 'アプリ,ゲーム,ロイヤリティ,Apple', '×'],
+  ['知財', '知財,特許,発明', '×'],
+  ['営業システム', 'システム,楽楽販売,Redmine', '×'],
+  ['その他', '', '×']
+];
+
+function importGyomu() {
+  const ui = SpreadsheetApp.getUi();
+  const ans = ui.alert('業務分掌を大・中・小タスクに反映',
+    '「' + GYOMU_SRC + '」の営業課の業務 ' + GYOMU.length + ' 件を、大タスク → 中タスク → 小タスクとして「タスク」シートに登録します。' +
+    '\n（2回目以降は予定工数・メモだけ更新し、重複登録はしません）' +
+    '\n\n設定シートのカテゴリも「中タスク」（客先窓口・見積もり業務・売上業務…）に置き換えますか？' +
+    '\n　はい＝置き換える（集計・移管シミュレーションが中タスク別になります）' +
+    '\n　いいえ＝カテゴリはそのまま', ui.ButtonSet.YES_NO_CANCEL);
+  if (ans !== ui.Button.YES && ans !== ui.Button.NO) return;
+  const msg = withLock_(() => applyGyomu_(ans === ui.Button.YES));
+  ui.alert(msg);
+}
+
+function applyGyomu_(replaceCats) {
+  const sh = sheet_(SH.TASK);
+  ensureTaskColumns_(sh);
+  refreshTaskFormulas_(sh);
+  const cfg = readConfig_();
+  if (replaceCats) writeGyomuCats_(cfg.sheet);
+  const names = cfg.allMembers.map(m => m.name);
+  const ownerOf = p => names.find(n => n.replace(/\s|　/g, '').indexOf(p) === 0) || p;
+
+  // 木構造に組み立て（大 → 中 → 小）
+  const tree = [];
+  GYOMU.concat([GYOMU_OTHER]).forEach(g => {
+    let b = tree.find(x => x.name === g[0]);
+    if (!b) tree.push(b = { name: g[0], mids: [] });
+    let m = b.mids.find(x => x.name === g[1]);
+    if (!m) b.mids.push(m = { name: g[1], items: [] });
+    m.items.push(g);
+  });
+  const planOf = g => Object.keys(g[4]).reduce((s, k) => s + g[4][k], 0);
+  const memoOf = g => {
+    const fmt = o => Object.keys(o).map(k => k + ' ' + o[k] + 'h').join('・');
+    return [g[3] && '担当区分：' + g[3], g[7] && '【資材購買課が担当中】',
+      Object.keys(g[4]).length && '月間工数：' + fmt(g[4]), Object.keys(g[5]).length && '新規追加見込（月）：' + fmt(g[5]),
+      g[6] && '購買課：' + g[6] + 'h／月', g[8].length && '具体的作業：' + g[8].join('／'), g[9] && '補足：' + g[9]]
+      .filter(Boolean).join('\n');
+  };
+
+  const exist = {};
+  readTasks_().forEach(t => { if (t.level) exist[t.level + '|' + t.parent + '|' + t.name] = t; });
+  const n0 = Math.max(sh.getLastRow() - 1, 0);
+  const v = n0 ? sh.getRange(2, 1, n0, 3).getValues() : [];
+  let maxNo = maxTaskNo_(v.map(r => r[0])), lastUsed = -1;
+  v.forEach((r, i) => { if (r[0] || String(r[2]).trim()) lastUsed = i; });
+  const startRow = lastUsed + 3;
+  const newRows = [];
+  let updated = 0;
+  const put = (lv, parent, name, f) => {
+    const t = exist[lv + '|' + parent + '|' + name];
+    if (t) {
+      writeTaskFields_(sh, findTaskRow_(sh, t.id), { plan: f.plan, cat: f.cat, memo: f.memo });
+      updated++;
+      return t.id;
+    }
+    const id = fmtId_(++maxNo), r = startRow + newRows.length, fm = taskFormulas_(r);
+    const row = new Array(TASK_HEAD.length).fill('');
+    row[TC.id - 1] = id; row[TC.name - 1] = name; row[TC.owner - 1] = f.owner || ''; row[TC.dept - 1] = fm.dept;
+    row[TC.cat - 1] = f.cat || ''; row[TC.status - 1] = '進行中'; row[TC.prio - 1] = '中'; row[TC.plan - 1] = f.plan;
+    fm.tail.forEach((x, i) => { row[TC.actual - 1 + i] = x; });
+    row[TC.memo - 1] = f.memo || ''; row[TC.parent - 1] = parent; row[TC.level - 1] = lv;
+    newRows.push(row);
+    return id;
+  };
+  let nb = 0, nm = 0, ns = 0;
+  tree.forEach(b => {
+    const bPlan = b.mids.reduce((s, m) => s + m.items.reduce((t, g) => t + planOf(g), 0), 0);
+    const bid = put('大', '', b.name, { plan: bPlan, cat: '', memo: '業務分掌（' + GYOMU_SRC + '）の大項目。予定工数＝配下の月間工数の合計' });
+    nb++;
+    b.mids.forEach(m => {
+      const mPlan = m.items.reduce((t, g) => t + planOf(g), 0);
+      const mid = put('中', bid, m.name, { plan: mPlan, cat: m.name, memo: '予定工数＝配下の月間工数の合計' });
+      nm++;
+      m.items.forEach(g => {
+        const who = Object.keys(g[4]).filter(k => g[4][k] > 0);
+        put('小', mid, g[2], { plan: planOf(g), cat: m.name, owner: who.length === 1 ? ownerOf(who[0]) : '', memo: memoOf(g) });
+        ns++;
+      });
+    });
+  });
+  if (newRows.length) {
+    const rg = sh.getRange(startRow, 1, newRows.length, TASK_HEAD.length);
+    rg.setValues(newRows);
+    box_(rg);
+    sh.getRange(startRow, TC.plan, newRows.length, 2).setNumberFormat('0.0');
+    sh.getRange(startRow, TC.rate, newRows.length, 1).setNumberFormat('0%');
+    sh.getRange(startRow, TC.remain, newRows.length, 1).setNumberFormat('0.0');
+    sh.getRange(startRow, TC.last, newRows.length, 1).setNumberFormat('yyyy/mm/dd');
+    sh.getRange(startRow, TC.memo, newRows.length, 1).setWrap(false);
+    newRows.forEach((r, i) => {
+      const bg = r[TC.level - 1] === '大' ? '#1f3864' : r[TC.level - 1] === '中' ? '#d9e1f2' : null;
+      if (bg) sh.getRange(startRow + i, TC.id, 1, TC.name).setBackground(bg).setFontColor(bg === '#1f3864' ? '#ffffff' : '#000000').setFontWeight('bold');
+    });
+  }
+  sh.getRange(2, TC.level, Math.max(sh.getLastRow() - 1, 1), 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(LEVELS, true).setAllowInvalid(true).build());
+  return '業務分掌を反映しました：大 ' + nb + '・中 ' + nm + '・小 ' + ns + ' 件（新規 ' + newRows.length + '件／更新 ' + updated + '件）' +
+    (replaceCats ? '\nカテゴリを中タスク（' + GYOMU_CATS.length + '種）に置き換えました。' : '') +
+    '\n\nカレンダーの予定を小タスクに付けると、中・大タスクにも実績が合算されます（Web画面「カレンダー」タブ、または件名にタスクID）。';
+}
+
+function writeGyomuCats_(conf) {
+  const rows = [];
+  for (let i = 0; i < CAT_ROWS; i++) rows.push(GYOMU_CATS[i] || ['', '', '']);
+  conf.getRange(5, 7, CAT_ROWS, 3).setValues(rows);
 }
 
 // ================= トリガー =================
@@ -714,22 +953,22 @@ function buildTasks_(sh) {
     ['資料作成', '未着手', '低', addDays_(t, 5), addDays_(t, 14), 4]]);
 
   const jr = sh.getRange(2, TC.judge, N, 1);
-  sh.setConditionalFormatRules([['期限超過', '#ffc7ce', '#9c0006'], ['工数超過', '#ffc7ce', '#9c0006'], ['注意', '#ffeb9c', '#9c5700'], ['完了', '#e7e6e6', '#7f7f7f']]
+  sh.setConditionalFormatRules([['期限超過', '#ffc7ce', '#9c0006'], ['工数超過', '#ffc7ce', '#9c0006'], ['注意', '#ffeb9c', '#9c5700'], ['完了', '#e7e6e6', '#7f7f7f'], ['定常業務', '#ddebf7', '#1f3864']]
     .map(x => SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(x[0]).setBackground(x[1]).setFontColor(x[2]).setRanges([jr]).build()));
-  [80, 130, 220, 100, 90, 120, 80, 55, 90, 90, 80, 80, 60, 70, 75, 90, 200, 160].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  [80, 130, 220, 100, 90, 120, 80, 55, 90, 90, 80, 80, 60, 70, 75, 90, 200, 160, 85, 50].forEach((w, i) => sh.setColumnWidth(i + 1, w));
   sh.getRange('A1').setNote('タスク名を入力するとIDが自動で付きます。カレンダーの予定の件名か説明に「T-0001」のようにIDを書くと、その時間がこのタスクの実績になります。');
 }
 
 function taskFormulas_(r) {
-  const H = '工数ログ!$D:$D', I = '工数ログ!$I:$I', A = '工数ログ!$A:$A';
+  const H = '工数ログ!$D:$D', I = '工数ログ!$I:$I', A = '工数ログ!$A:$A', N = '工数ログ!$N:$N';
   return {
     dept: '=IF(D' + r + '="","",IFERROR(VLOOKUP(D' + r + ',設定!$A$5:$B$34,2,FALSE),""))',
     tail: [
-      '=IF(A' + r + '="","",SUMIFS(' + H + ',' + I + ',A' + r + '))',
+      '=IF(A' + r + '="","",SUMIFS(' + H + ',' + I + ',A' + r + ')+SUMIFS(' + H + ',' + N + ',"*,"&A' + r + '&",*"))',
       '=IF(OR(A' + r + '="",N(K' + r + ')=0),"",L' + r + '/K' + r + ')',
       '=IF(OR(A' + r + '="",K' + r + '=""),"",K' + r + '-L' + r + ')',
-      '=IF(C' + r + '="","",IF(G' + r + '="完了","完了",IF(AND(J' + r + '<>"",J' + r + '<TODAY()),"期限超過",IF(AND(N(K' + r + ')>0,L' + r + '>K' + r + '),"工数超過",IF(AND(N(K' + r + ')>0,L' + r + '>=K' + r + '*0.8),"注意","順調")))))',
-      '=IF(A' + r + '="","",IFERROR(1/(1/MAXIFS(' + A + ',' + I + ',A' + r + ')),""))'
+      '=IF(C' + r + '="","",IF(T' + r + '<>"","定常業務",IF(G' + r + '="完了","完了",IF(AND(J' + r + '<>"",J' + r + '<TODAY()),"期限超過",IF(AND(N(K' + r + ')>0,L' + r + '>K' + r + '),"工数超過",IF(AND(N(K' + r + ')>0,L' + r + '>=K' + r + '*0.8),"注意","順調"))))))',
+      '=IF(A' + r + '="","",IFERROR(1/(1/MAX(MAXIFS(' + A + ',' + I + ',A' + r + '),MAXIFS(' + A + ',' + N + ',"*,"&A' + r + '&",*"))),""))'
     ]
   };
 }
@@ -891,7 +1130,8 @@ function readTasks_() {
       id: String(r[0]), proj: String(r[1]), name: String(r[2]), owner: String(r[3]), dept: String(r[4]), cat: String(r[5]),
       status: STATUSES.indexOf(r[6]) >= 0 ? r[6] : '未着手', prio: String(r[7] || ''),
       start: ymd_(r[8]), due: ymd_(r[9]), plan: num_(r[10]), actual: num_(r[11]) || 0,
-      judge: String(r[14] || ''), last: ymd_(r[15]), memo: String(r[16] || ''), calEv: String(r[17] || '')
+      judge: String(r[14] || ''), last: ymd_(r[15]), memo: String(r[16] || ''), calEv: String(r[17] || ''),
+      parent: String(r[18] || ''), level: LEVELS.indexOf(r[19]) >= 0 ? r[19] : ''
     });
   });
   return out;
@@ -913,6 +1153,7 @@ function writeTaskFields_(sh, row, p) {
     let v = p[k];
     if (k === 'start' || k === 'due') v = v ? parseYmd_(v) : '';
     else if (k === 'plan') v = (v === '' || v == null) ? '' : Number(v);
+    else if (k === 'parent' && v && String(sh.getRange(row, TC.id).getValue()) === String(v)) throw new Error('自分自身を親タスクにはできません');
     else v = v == null ? '' : String(v);
     sh.getRange(row, FIELD_COL[k]).setValue(v);
   });

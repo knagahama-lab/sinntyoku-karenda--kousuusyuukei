@@ -92,6 +92,15 @@ pre.sum{white-space:pre-wrap;background:#f7f8fb;border:1px solid #e3e6ee;border-
 .fgrid input,.fgrid select,.fgrid textarea{width:100%}
 .mfoot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
 .idbox{background:#f1f4fa;border:1px dashed #9aa5b8;border-radius:4px;padding:6px 8px;font-size:12px;margin-bottom:10px}
+/* 業務ツリー */
+table.pt tr.lv-大 td{background:#1f3864;color:#fff;font-weight:bold}
+table.pt tr.lv-中 td{background:#d9e1f2;font-weight:bold}
+table.pt tr.lv-個別 td{color:#555;font-style:italic}
+table.pt tr.lv-大 td.hl{color:#000}
+.tg{cursor:pointer;user-select:none;display:inline-block;width:14px}
+.pv{display:inline-block;height:8px;border-radius:2px;background:#3f7fd1;vertical-align:middle}
+.pv.over{background:var(--bad)}.pv.under{background:#9aa5b8}
+td.dpos{color:var(--bad);font-weight:bold}td.dneg{color:#1565c0}
 /* 週カレンダー */
 .week{display:grid;grid-template-columns:44px repeat(7,minmax(90px,1fr));background:#fff;border:1px solid var(--line);overflow:auto;max-height:calc(100vh - 210px)}
 .wk-h{position:sticky;top:0;z-index:3;background:var(--head);color:#fff;text-align:center;font-weight:bold;padding:4px 2px;font-size:12px;border-left:1px solid #3a4f7a}
@@ -214,6 +223,7 @@ table.pt select{font-size:12px;padding:1px 2px;max-width:200px}
       <label>開始日</label><input type="date" id="tStart">
       <label>期限</label><input type="date" id="tDue">
       <label>予定工数(h)</label><input type="number" id="tPlan" min="0" step="0.5">
+      <label>親タスク</label><select id="tParent"></select>
       <label>メモ</label><textarea id="tMemo" rows="3"></textarea>
     </div>
     <datalist id="projList"></datalist>
@@ -281,6 +291,7 @@ function uniq(a) { var o = {}; return a.filter(function (x) { return o[x] ? fals
 function filtered() {
   var o = $('#fOwner').value, dp = $('#fDept').value, p = $('#fProj').value, q = $('#fQ').value.trim(), done = $('#fDone').checked;
   return S.data.tasks.filter(function (t) {
+    if (t.level) return false;  // 業務分掌の大・中・小は「予実・工数」のツリーで表示
     if (!done && t.status === '完了') return false;
     if (o && t.owner !== o) return false;
     if (dp && t.dept !== dp) return false;
@@ -441,6 +452,7 @@ function renderDash() {
     d.projs.slice(0, 30).map(function (p) { return '<tr><td>' + esc(p.proj) + '</td><td>' + hbar(p.h, mj) + '</td></tr>'; }).join('') + '</table></div></div>';
 
   // タスク予実
+  html += gyomuTreeHtml(d, mf);
   var order = ['期限超過', '工数超過', '注意', '順調', '完了'];
   html += '<div class="panel" style="margin-top:14px"><h4>タスク予実（上の担当者・部署・案件フィルタが効きます）</h4><table class="pt"><tr><th>ID</th><th>タスク</th><th>案件</th><th>担当</th><th>予定(h)</th><th>実績(h)</th><th>消化率</th><th>期限</th><th>判定</th></tr>' +
     order.map(function (j) {
@@ -454,6 +466,38 @@ function renderDash() {
       }).join('');
     }).join('') + '</table></div>';
   $('#dashBody').innerHTML = html;
+}
+function gyomuTreeHtml(d, mf) {
+  var lvTasks = S.data.tasks.filter(function (t) { return t.level; });
+  if (!lvTasks.length) return '';
+  S.fold = S.fold || {};
+  var th = d.taskHours || {}, kids = {};
+  S.data.tasks.forEach(function (t) { if (t.level || t.parent) (kids[t.parent || ''] = kids[t.parent || ''] || []).push(t); });
+  var roots = (kids[''] || []).filter(function (t) { return t.level === '大'; });
+  var linked = 0;
+  roots.forEach(function (t) { linked += th[t.id] || 0; });
+  var maxPlan = Math.max.apply(null, lvTasks.map(function (t) { return t.plan || 0; }).concat([1]));
+  var rows = '';
+  (function rec(list, depth) {
+    list.forEach(function (t) {
+      var ch = kids[t.id] || [], open = !S.fold[t.id];
+      var act = th[t.id] || 0, mon = act * mf, plan = t.plan || 0, diff = mon - plan;
+      var cls = plan && mon > plan * 1.2 ? 'over' : plan && mon < plan * 0.5 ? 'under' : '';
+      var w = Math.min(160, Math.round(mon / maxPlan * 160)), wp = Math.min(160, Math.round(plan / maxPlan * 160));
+      rows += '<tr class="lv-' + (t.level || '個別') + '" data-tid="' + esc(t.id) + '">' +
+        '<td style="padding-left:' + (6 + depth * 16) + 'px">' + (ch.length ? '<span class="tg" data-fold="' + esc(t.id) + '">' + (open ? '▾' : '▸') + '</span>' : '<span class="tg"></span>') +
+        esc(t.name) + (t.level ? '' : ' <span class="hint">（' + esc(t.id) + '）</span>') + '</td>' +
+        '<td>' + esc(t.owner) + '</td><td class="n">' + (plan ? h1(plan) : '-') + '</td><td class="n">' + h1(act) + '</td><td class="n hl">' + h1(mon) + '</td>' +
+        '<td class="n ' + (plan ? (diff > 0 ? 'dpos' : 'dneg') : '') + '">' + (plan ? (diff > 0 ? '+' : '') + h1(diff) : '-') + '</td>' +
+        '<td><span class="pv ' + cls + '" style="width:' + w + 'px"></span>' + (plan ? '<span class="pv under" style="width:2px;height:12px;margin-left:' + Math.max(0, wp - w) + 'px"></span>' : '') + '</td></tr>';
+      if (open && ch.length) rec(ch, depth + 1);
+    });
+  })(roots, 0);
+  var rest = Math.max(0, d.total - linked);
+  return '<div class="panel" style="margin-top:14px"><h4>業務分掌 予実（大・中・小タスク）　<span class="hint">月間予定＝業務分掌の工数／実績はこの期間を月換算（×' + (Math.round(mf * 100) / 100) + '）。行クリックで編集、▾で開閉</span>' +
+    ' <button class="sec" id="foldAll" style="padding:1px 8px">中まで表示</button> <button class="sec" id="openAll" style="padding:1px 8px">すべて開く</button></h4>' +
+    '<table class="pt"><tr><th>業務</th><th>担当</th><th>月間予定(h)</th><th>期間実績(h)</th><th class="hl" style="color:#000">実績 月換算(h)</th><th>差(h/月)</th><th>予実（縦線＝予定）</th></tr>' + rows +
+    '<tr class="tot"><td>業務分掌に未設定の工数</td><td></td><td></td><td class="n">' + h1(rest) + '</td><td class="n">' + h1(rest * mf) + '</td><td colspan="2" class="hint">カレンダータブで予定に小タスクを付けると減ります</td></tr></table></div>';
 }
 
 // ---------- 日報 ----------
@@ -495,13 +539,14 @@ function openEditor(id) {
   $('#tDue').value = t ? t.due : '';
   $('#tPlan').value = t && t.plan != null ? t.plan : '';
   $('#tMemo').value = t ? t.memo : '';
+  $('#tParent').innerHTML = parentOpts(t ? t.parent : '', t ? t.id : '');
   $('#modal').classList.add('on');
   $('#tName').focus();
 }
 function closeEditor() { $('#modal').classList.remove('on'); }
 function saveEditor() {
   var p = { name: $('#tName').value.trim(), proj: $('#tProj').value.trim(), owner: $('#tOwner').value, cat: $('#tCat').value, status: $('#tStatus').value,
-    prio: $('#tPrio').value, start: $('#tStart').value, due: $('#tDue').value, plan: $('#tPlan').value, memo: $('#tMemo').value };
+    prio: $('#tPrio').value, start: $('#tStart').value, due: $('#tDue').value, plan: $('#tPlan').value, memo: $('#tMemo').value, parent: $('#tParent').value };
   if (!p.name) { toast('タスク名を入力してください'); return; }
   if (p.start && p.due && p.due < p.start) { toast('期限が開始日より前になっています'); return; }
   $('#mSave').disabled = true;
@@ -520,9 +565,28 @@ function endMin(e) { return e.end.slice(0, 10) > e.start.slice(0, 10) ? 24 * 60 
 function durH(e) { return (endMin(e) - mins(e.start)) / 60; }
 function dayEvents(ds) { return S.cal.events.filter(function (e) { return e.start.slice(0, 10) === ds; }).sort(function (a, b) { return a.start < b.start ? -1 : 1; }); }
 function dayHours(ds) { return dayEvents(ds).filter(function (e) { return !e.excluded; }).reduce(function (s, e) { return s + durH(e); }, 0); }
+function treeOrder() {
+  var kids = {}, out = [];
+  S.data.tasks.filter(function (t) { return t.level; }).forEach(function (t) { (kids[t.parent || ''] = kids[t.parent || ''] || []).push(t); });
+  (function rec(pid, depth) { (kids[pid] || []).forEach(function (t) { if (depth > 5) return; out.push({ t: t, depth: depth }); rec(t.id, depth + 1); }); })('', 0);
+  return out;
+}
+var LV_MARK = { '大': '■ ', '中': '　▸ ', '小': '　　・' };
+function parentOpts(sel, selfId) {
+  return '<option value="">（なし）</option>' + treeOrder().filter(function (x) { return x.t.id !== selfId; }).map(function (x) {
+    return '<option value="' + esc(x.t.id) + '"' + (x.t.id === sel ? ' selected' : '') + '>' + esc(LV_MARK[x.t.level] + x.t.name) + '</option>';
+  }).join('');
+}
 function taskOpts(sel) {
-  var ts = S.data.tasks.filter(function (t) { return t.status !== '完了' || t.id === sel; });
-  return '<option value="">（なし）</option>' + ts.map(function (t) { return '<option value="' + esc(t.id) + '"' + (t.id === sel ? ' selected' : '') + '>' + esc(t.id + ' ' + t.name) + '</option>'; }).join('');
+  var ts = S.data.tasks.filter(function (t) { return !t.level && (t.status !== '完了' || t.id === sel); });
+  var html = '<option value="">（なし）</option>';
+  if (ts.length) html += '<optgroup label="個別タスク">' + ts.map(function (t) { return '<option value="' + esc(t.id) + '"' + (t.id === sel ? ' selected' : '') + '>' + esc(t.id + ' ' + t.name) + '</option>'; }).join('') + '</optgroup>';
+  var grp = '';
+  treeOrder().forEach(function (x) {
+    if (x.t.level === '大') { if (grp) html += '</optgroup>'; html += '<optgroup label="' + esc('■ ' + x.t.name) + '">'; grp = x.t.id; return; }
+    html += '<option value="' + esc(x.t.id) + '"' + (x.t.id === sel ? ' selected' : '') + '>' + esc((x.t.level === '中' ? '▸ ' : '　・') + x.t.name) + '</option>';
+  });
+  return html + (grp ? '</optgroup>' : '');
 }
 function catOpts(e) {
   return '<option value="">（自動' + (e.manualCat ? '' : '：' + esc(e.cat)) + '）</option>' + S.data.cats.map(function (c) { return '<option' + (c === e.manualCat ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('');
@@ -719,7 +783,13 @@ initCalEvents();
 initAdminEvents();
 $('#dPreset').onchange = dashPreset;
 $('#dGo').onclick = function () { $('#dPreset').value = 'c'; loadDash(); };
-$('#dashBody').onclick = function (e) { var tr = e.target.closest('tr[data-id]'); if (tr) openEditor(tr.dataset.id); };
+$('#dashBody').onclick = function (e) {
+  var f = e.target.closest('[data-fold]');
+  if (f) { S.fold = S.fold || {}; S.fold[f.dataset.fold] = !S.fold[f.dataset.fold]; renderDash(); return; }
+  if (e.target.id === 'foldAll') { S.fold = {}; S.data.tasks.forEach(function (t) { if (t.level === '中') S.fold[t.id] = true; }); renderDash(); return; }
+  if (e.target.id === 'openAll') { S.fold = {}; renderDash(); return; }
+  var tr = e.target.closest('tr[data-id],tr[data-tid]'); if (tr) openEditor(tr.dataset.id || tr.dataset.tid);
+};
 $('#rGo').onclick = loadDaily;
 $('#rName').onchange = loadDaily;
 $('#rDate').onchange = loadDaily;
