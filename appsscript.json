@@ -12,6 +12,10 @@
     "https://www.googleapis.com/auth/script.container.ui",
     "https://www.googleapis.com/auth/userinfo.email"
   ],
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "DOMAIN"
+  },
   "exceptionLogging": "STACKDRIVER",
   "runtimeVersion": "V8"
 }
