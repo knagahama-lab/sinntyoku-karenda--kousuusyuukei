@@ -9,8 +9,8 @@ const TASK_ID_RE = /\b[Tt]-(\d{1,5})\b/;
 const PROJ_RE = /[@＠]([^\s　@＠#＃【】\[\]［］]+)/;
 const CLR = { head: '#1f3864', sub: '#d9e1f2', yel: '#fff200', gry: '#f2f2f2', line: '#808080' };
 // タスクシートの列（1始まり）
-const TC = { id: 1, proj: 2, name: 3, owner: 4, dept: 5, cat: 6, status: 7, prio: 8, start: 9, due: 10, plan: 11, actual: 12, rate: 13, remain: 14, judge: 15, last: 16, memo: 17 };
-const TASK_HEAD = ['タスクID', '案件', 'タスク名', '担当者', '部署', 'カテゴリ', 'ステータス', '優先度', '開始日', '期限', '予定工数(h)', '実績工数(h)', '消化率', '残工数(h)', '判定', '最終作業日', 'メモ'];
+const TC = { id: 1, proj: 2, name: 3, owner: 4, dept: 5, cat: 6, status: 7, prio: 8, start: 9, due: 10, plan: 11, actual: 12, rate: 13, remain: 14, judge: 15, last: 16, memo: 17, calEv: 18 };
+const TASK_HEAD = ['タスクID', '案件', 'タスク名', '担当者', '部署', 'カテゴリ', 'ステータス', '優先度', '開始日', '期限', '予定工数(h)', '実績工数(h)', '消化率', '残工数(h)', '判定', '最終作業日', 'メモ', 'カレンダー予定ID'];
 const LOG_HEAD = ['日付', '開始', '終了', '時間(h)', '氏名', '部署', 'カテゴリ', '案件', 'タスクID', '件名', '判定方法', 'イベントID', 'カレンダーID'];
 const DAILY_HEAD = ['日付', '氏名', '合計(h)', '業務内容（カレンダーから自動）', '所感・コメント', '更新日時'];
 const FIELD_COL = { proj: TC.proj, name: TC.name, owner: TC.owner, cat: TC.cat, status: TC.status, prio: TC.prio, start: TC.start, due: TC.due, plan: TC.plan, memo: TC.memo };
@@ -23,7 +23,8 @@ function onOpen() {
     .addItem('カレンダーから取り込む（直近）', 'importRecent')
     .addItem('全期間を取り込み直す', 'importAll')
     .addSeparator()
-    .addItem('毎朝6時の自動取り込みをON', 'installTrigger')
+    .addItem('タスク用カレンダーを今すぐ同期', 'syncTaskCalendars')
+    .addItem('毎朝6時の自動取り込みをON（タスク同期も）', 'installTrigger')
     .addItem('自動取り込みをOFF', 'removeTrigger')
     .addSeparator()
     .addItem('ボード／ガント画面のURLを表示', 'showWebAppUrl')
@@ -75,18 +76,23 @@ function updateTask(id, patch) {
 
 function createTask(p) {
   return withLock_(() => {
-    const sh = sheet_(SH.TASK);
-    const last = Math.max(sh.getLastRow(), 1);
-    const v = last > 1 ? sh.getRange(2, 1, last - 1, 3).getValues() : [];
-    let idx = v.findIndex(r => !r[0] && !String(r[2]).trim());
-    const row = idx >= 0 ? idx + 2 : last + 1;
-    const id = fmtId_(maxTaskNo_(v.map(r => r[0])) + 1);
-    sh.getRange(row, TC.id).setValue(id);
-    writeTaskFormulas_(sh, row);
-    writeTaskFields_(sh, row, Object.assign({ status: '未着手', prio: '中' }, p || {}));
+    const id = insertTask_(sheet_(SH.TASK), p, '');
     SpreadsheetApp.flush();
     return { id: id, tasks: readTasks_() };
   });
+}
+
+function insertTask_(sh, p, calEv) {
+  const last = Math.max(sh.getLastRow(), 1);
+  const v = last > 1 ? sh.getRange(2, 1, last - 1, 3).getValues() : [];
+  const idx = v.findIndex(r => !r[0] && !String(r[2]).trim());
+  const row = idx >= 0 ? idx + 2 : last + 1;
+  const id = fmtId_(maxTaskNo_(v.map(r => r[0])) + 1);
+  sh.getRange(row, TC.id).setValue(id);
+  writeTaskFormulas_(sh, row);
+  writeTaskFields_(sh, row, Object.assign({ status: '未着手', prio: '中' }, p || {}));
+  if (calEv) sh.getRange(row, TC.calEv).setValue(calEv);
+  return id;
 }
 
 function getDashboard(fromStr, toStr) {
@@ -152,7 +158,8 @@ function importRecent() {
   let from = addDays_(today, -cfg.recentDays);
   if (cfg.startDate && cfg.startDate > from) from = cfg.startDate;
   if (sheet_(SH.LOG).getLastRow() < 2) from = cfg.startDate || addDays_(today, -28);
-  return runImport_(cfg, from, addDays_(today, 1));
+  if (cfg.taskCals.length) { try { syncTaskCalendars(); } catch (e) { console.error(e); } }
+  return runImport_(readConfig_(), from, addDays_(today, 1));
 }
 
 function importAll() {
@@ -231,10 +238,11 @@ function classifyEvent_(ev, cfg, taskMap) {
   const title = ev.summary || '', desc = ev.description || '';
   const xp = (ev.extendedProperties && ev.extendedProperties.private) || {};
   const idm = xp.kousuuTask ? String(xp.kousuuTask).match(TASK_ID_RE) : (title + ' ' + desc).match(TASK_ID_RE);
-  const taskId = idm ? fmtId_(Number(idm[1])) : '';
+  const linked = !idm && taskMap._ev ? taskMap._ev[ev.recurringEventId || ev.id] : null; // タスク用カレンダーと同じ予定
+  const taskId = idm ? fmtId_(Number(idm[1])) : (linked ? linked.id : '');
   const task = taskId ? taskMap[taskId] : null;
   let cat, how;
-  if (task && task.cat) { cat = task.cat; how = xp.kousuuTask ? '手動（タスク）' : 'タスクID'; }
+  if (task && task.cat) { cat = task.cat; how = xp.kousuuTask ? '手動（タスク）' : linked ? 'タスク予定' : 'タスクID'; }
   else if (xp.kousuuCat && cfg.cats.some(c => c.name === xp.kousuuCat)) { cat = xp.kousuuCat; how = '手動'; }
   else {
     const c = classify_(title, cfg.cats);
@@ -263,7 +271,8 @@ function getAdminData() {
   const cfg = readConfig_();
   const props = PropertiesService.getScriptProperties();
   return {
-    isAdmin: isAdmin_(cfg), owner: ownerEmail_(), depts: cfg.depts,
+    isAdmin: isAdmin_(cfg), owner: ownerEmail_(), depts: cfg.depts, taskCals: cfg.taskCals.join(','), lastTaskSync: cfg.lastTaskSync,
+    taskTrigger: ScriptApp.getProjectTriggers().some(t => t.getHandlerFunction() === 'syncTaskCalendars'),
     members: cfg.sheet.getRange(5, 1, MEMBER_ROWS, 5).getValues().map((r, i) => {
       const calId = String(r[2]).trim();
       return { row: 5 + i, name: String(r[0]).trim(), dept: String(r[1]).trim(), calId: calId, on: r[3] === true,
@@ -425,18 +434,173 @@ function member_(cfg, calId) {
 }
 function isOrganizer_(ev, calId) { return !ev.organizer || ev.organizer.self === true || String(ev.organizer.email || '').toLowerCase() === calId.toLowerCase(); }
 function localIso_(s) { return s ? Utilities.formatDate(new Date(s), tz_(), "yyyy-MM-dd'T'HH:mm") : ''; }
-function taskMap_() { const m = {}; readTasks_().forEach(t => { m[t.id] = t; }); return m; }
+function taskMap_() {
+  const m = {};
+  Object.defineProperty(m, '_ev', { value: {}, enumerable: false });
+  readTasks_().forEach(t => { m[t.id] = t; if (t.calEv) m._ev[t.calEv] = t; });
+  return m;
+}
+
+// ================= タスク用カレンダー → タスク自動追加 =================
+// 共有カレンダー（例：営業やる事）に入った予定を1件＝1タスクとして「タスク」シートへ追加・更新する。
+// カレンダー側が正：タスク名・開始日・期限・案件。システム側が正：ステータス・予定工数・担当者（空欄時のみ補完）。
+function syncTaskCalendars() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return '他の同期が実行中です';
+  try {
+    const cfg = readConfig_();
+    if (!cfg.taskCals.length) return 'タスク用カレンダーIDが未設定です（設定シートL14 または Web画面の管理タブ）';
+    const msg = syncTaskCalendars_(cfg);
+    try { SpreadsheetApp.getActive().toast(msg, '工数管理', 8); } catch (e) {}
+    return msg;
+  } finally { lock.releaseLock(); }
+}
+
+function syncTaskCalendars_(cfg) {
+  const sh = sheet_(SH.TASK);
+  ensureTaskColumns_(sh);
+  const today = startOfDay_(new Date());
+  let from = addDays_(today, -90);
+  if (cfg.startDate && cfg.startDate < from) from = cfg.startDate;
+  const to = addDays_(today, 366);
+  const memberByMail = {};
+  cfg.allMembers.forEach(m => { if (m.calId) memberByMail[m.calId.toLowerCase()] = m.name; });
+  const n = sh.getLastRow() - 1;
+  const rows = n > 0 ? sh.getRange(2, 1, n, TASK_HEAD.length).getValues() : [];
+  const byEv = {};
+  rows.forEach((r, i) => { const k = String(r[TC.calEv - 1] || ''); if (k) byEv[k] = { row: i + 2, r: r }; });
+  let added = 0, updated = 0, closed = 0;
+  const errs = [];
+  cfg.taskCals.forEach(calId => {
+    try {
+      let pageToken = null;
+      do {
+        const opt = { timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: false, showDeleted: true, maxResults: 2500 };
+        if (pageToken) opt.pageToken = pageToken;
+        const res = Calendar.Events.list(calId, opt);
+        (res.items || []).forEach(ev => {
+          const cur = byEv[ev.id];
+          if (ev.status === 'cancelled') {
+            if (cur && cur.row > 0 && cur.r[TC.status - 1] !== '完了') {
+              writeTaskFields_(sh, cur.row, { status: '完了', memo: '[カレンダーで削除] ' + cur.r[TC.memo - 1] });
+              closed++;
+            }
+            return;
+          }
+          if (!ev.start) return;
+          const t = eventToTask_(ev, cfg, memberByMail);
+          if (!cur) {
+            insertTask_(sh, { name: t.name, proj: t.proj, owner: t.owner, cat: t.cat, start: t.start, due: t.due, plan: t.plan, memo: t.memo, status: t.done ? '完了' : '未着手' }, ev.id);
+            byEv[ev.id] = { row: -1, r: [] };
+            added++;
+          } else if (cur.row > 0) {
+            const r = cur.r, patch = {};
+            if (String(r[TC.name - 1]) !== t.name) patch.name = t.name;
+            if (ymd_(r[TC.start - 1]) !== t.start) patch.start = t.start;
+            if (ymd_(r[TC.due - 1]) !== t.due) patch.due = t.due;
+            if (t.proj && String(r[TC.proj - 1]) !== t.proj) patch.proj = t.proj;
+            if (t.done && r[TC.status - 1] !== '完了') patch.status = '完了';
+            if (!String(r[TC.owner - 1]).trim() && t.owner) patch.owner = t.owner;
+            if (Object.keys(patch).length) { writeTaskFields_(sh, cur.row, patch); updated++; }
+          }
+        });
+        pageToken = res.nextPageToken;
+      } while (pageToken);
+    } catch (e) {
+      errs.push(calId.slice(0, 24) + '…: ' + String(e.message || e).slice(0, 80));
+    }
+  });
+  const msg = 'タスク同期：追加 ' + added + '件・更新 ' + updated + '件' + (closed ? '・削除→完了 ' + closed + '件' : '') +
+    (errs.length ? ' ／ 失敗：' + errs.join(' / ') : '');
+  cfg.sheet.getRange('L15').setValue(Utilities.formatDate(new Date(), tz_(), 'MM/dd HH:mm') + ' ' + msg);
+  return msg;
+}
+
+function eventToTask_(ev, cfg, memberByMail) {
+  const title = String(ev.summary || '（件名なし）').trim();
+  const allDay = !!ev.start.date;
+  const s = allDay ? parseYmd_(ev.start.date) : new Date(ev.start.dateTime);
+  let e = allDay ? addDays_(parseYmd_(ev.end.date), -1) : new Date(ev.end.dateTime);
+  if (e < s) e = s;
+  const desc = stripHtml_(ev.description || '');
+  const pw = desc.match(/(?:予定)?工数\s*[:：]?\s*(\d+(?:\.\d+)?)/);
+  const plan = pw ? Number(pw[1]) : (allDay ? '' : Math.round((new Date(ev.end.dateTime) - new Date(ev.start.dateTime)) / 36000) / 100);
+  // 担当者：主催者→作成者→参加者の順に、登録メンバーのメールと一致した人
+  const mails = [ev.organizer && ev.organizer.email, ev.creator && ev.creator.email]
+    .concat((ev.attendees || []).filter(a => !a.resource && a.responseStatus !== 'declined').map(a => a.email));
+  const owner = mails.map(x => memberByMail[String(x || '').toLowerCase()]).find(Boolean) || '';
+  const pm = title.match(PROJ_RE);
+  const cat = classify_(title, cfg.cats)[0];
+  return {
+    name: title.replace(PROJ_RE, '').replace(/\s+/g, ' ').trim() || title,
+    proj: pm ? pm[1] : '', owner: owner, cat: cat === '未分類' ? '' : cat,
+    start: ymd_(s), due: ymd_(e), plan: plan, memo: desc.slice(0, 300),
+    done: /^\s*(✓|✔|☑|✅|【完了】|\[完了\]|済[ 　:：])/.test(title)
+  };
+}
+
+function installTaskTriggers_(cals) {
+  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'syncTaskCalendars').forEach(t => ScriptApp.deleteTrigger(t));
+  if (!cals.length) return '';
+  const ng = [];
+  cals.forEach(c => {
+    try { ScriptApp.newTrigger('syncTaskCalendars').forUserCalendar(c).onEventUpdated().create(); } catch (e) { ng.push(c); }
+  });
+  if (ng.length) {
+    ScriptApp.newTrigger('syncTaskCalendars').timeBased().everyMinutes(15).create();
+    return 'タスク用カレンダーは15分ごとに同期します。';
+  }
+  return 'タスク用カレンダーに予定が追加・変更されると、自動でタスクに反映します。';
+}
+
+function saveTaskCalendars(ids) {
+  const cfg = readConfig_();
+  assertAdmin_(cfg);
+  const list = splitList_(ids);
+  list.forEach(c => { if (c.indexOf('@') < 0) throw new Error('カレンダーIDの形式が正しくありません: ' + c); });
+  cfg.sheet.getRange('L14').setValue(list.join(','));
+  SpreadsheetApp.flush();
+  const trig = installTaskTriggers_(list);
+  const msg = list.length ? syncTaskCalendars() : 'タスク用カレンダーの連携を解除しました';
+  return { msg: msg + (trig ? '\n' + trig : ''), data: getAdminData() };
+}
+
+function runTaskSync() {
+  assertAdmin_(readConfig_());
+  return { msg: syncTaskCalendars(), data: getAdminData() };
+}
+
+function ensureConfigRows_(sh) {
+  if (String(sh.getRange('K14').getValue()).trim()) return;
+  sh.getRange('K14:K15').setValues([['タスク用カレンダーID（カンマ区切り）'], ['最終タスク同期']]);
+  box_(sh.getRange('K14:K15'), CLR.sub).setFontWeight('bold');
+  box_(sh.getRange('L14'), CLR.yel);
+  box_(sh.getRange('L15'), CLR.gry);
+}
+
+function ensureTaskColumns_(sh) {
+  if (String(sh.getRange(1, TC.calEv).getValue()).trim()) return;
+  head_(sh.getRange(1, TC.calEv), [TASK_HEAD[TC.calEv - 1]]);
+  sh.setColumnWidth(TC.calEv, 160);
+  sh.getRange(1, TC.calEv).setNote('タスク用カレンダーから自動追加されたタスクの予定ID（自動入力・編集しない）');
+}
+
+function stripHtml_(s) {
+  return String(s).replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim();
+}
 
 // ================= トリガー =================
 function installTrigger() {
   removeTrigger(true);
   ScriptApp.newTrigger('importRecent').timeBased().everyDays(1).atHour(6).create();
   saveSsId_();
-  SpreadsheetApp.getUi().alert('毎朝6時台にカレンダーを自動取り込みします。');
+  const t = installTaskTriggers_(readConfig_().taskCals);
+  SpreadsheetApp.getUi().alert('毎朝6時台にカレンダーを自動取り込みします。' + (t ? '\n' + t : ''));
 }
 
 function removeTrigger(silent) {
-  ScriptApp.getProjectTriggers().filter(t => t.getHandlerFunction() === 'importRecent').forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.getProjectTriggers().filter(t => ['importRecent', 'syncTaskCalendars'].indexOf(t.getHandlerFunction()) >= 0).forEach(t => ScriptApp.deleteTrigger(t));
   if (silent !== true) SpreadsheetApp.getUi().alert('自動取り込みをOFFにしました。');
 }
 
@@ -494,11 +658,12 @@ function buildConfig_(sh) {
   head_(sh.getRange('K4:L4'), ['項目', '値']);
   const today = startOfDay_(new Date());
   const st = [['取込開始日', addDays_(today, -28)], ['再取込する直近日数', 14], ['除外キーワード', '休憩,昼食,ランチ,私用,通院,休暇,有給,移動'],
-    ['部署1（移管元）', '営業課'], ['部署2（移管先）', '資材購買課'], ['月の営業日数', 20], ['人件費単価（円/時間）', 3000], ['最終取込', ''], ['管理者メール（カンマ区切り）', me]];
+    ['部署1（移管元）', '営業課'], ['部署2（移管先）', '資材購買課'], ['月の営業日数', 20], ['人件費単価（円/時間）', 3000], ['最終取込', ''], ['管理者メール（カンマ区切り）', me], ['タスク用カレンダーID（カンマ区切り）', ''], ['最終タスク同期', '']];
   sh.getRange(5, 11, st.length, 2).setValues(st);
   box_(sh.getRange(5, 11, st.length, 1), CLR.sub).setFontWeight('bold');
   box_(sh.getRange(5, 12, st.length, 1), CLR.yel).setHorizontalAlignment('left');
   box_(sh.getRange(12, 12), CLR.gry);
+  box_(sh.getRange(15, 12), CLR.gry);
   sh.getRange('L5').setNumberFormat('yyyy/mm/dd');
 
   const guide = [
@@ -551,7 +716,7 @@ function buildTasks_(sh) {
   const jr = sh.getRange(2, TC.judge, N, 1);
   sh.setConditionalFormatRules([['期限超過', '#ffc7ce', '#9c0006'], ['工数超過', '#ffc7ce', '#9c0006'], ['注意', '#ffeb9c', '#9c5700'], ['完了', '#e7e6e6', '#7f7f7f']]
     .map(x => SpreadsheetApp.newConditionalFormatRule().whenTextEqualTo(x[0]).setBackground(x[1]).setFontColor(x[2]).setRanges([jr]).build()));
-  [80, 130, 220, 100, 90, 120, 80, 55, 90, 90, 80, 80, 60, 70, 75, 90, 200].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  [80, 130, 220, 100, 90, 120, 80, 55, 90, 90, 80, 80, 60, 70, 75, 90, 200, 160].forEach((w, i) => sh.setColumnWidth(i + 1, w));
   sh.getRange('A1').setNote('タスク名を入力するとIDが自動で付きます。カレンダーの予定の件名か説明に「T-0001」のようにIDを書くと、その時間がこのタスクの実績になります。');
 }
 
@@ -701,7 +866,8 @@ function readConfig_() {
     .filter(x => x.name);
   const cats = sh.getRange(5, 7, CAT_ROWS, 3).getValues().filter(r => String(r[0]).trim())
     .map(r => ({ name: String(r[0]).trim(), kws: splitList_(r[1]), transfer: String(r[2]).trim() === '○' }));
-  const s = sh.getRange(5, 12, 9, 1).getValues().map(r => r[0]);
+  ensureConfigRows_(sh);
+  const s = sh.getRange(5, 12, 11, 1).getValues().map(r => r[0]);
   return {
     sheet: sh, allMembers: allMembers, members: allMembers.filter(x => x.calId && x.on), cats: cats,
     startDate: s[0] instanceof Date ? startOfDay_(s[0]) : null,
@@ -709,7 +875,8 @@ function readConfig_() {
     depts: [String(s[3]).trim(), String(s[4]).trim()],
     monthDays: Number(s[5]) || 20, wage: Number(s[6]) || 0,
     lastImport: s[7] instanceof Date ? Utilities.formatDate(s[7], tz_(), 'yyyy/MM/dd HH:mm') : '',
-    admins: splitList_(s[8]).map(x => x.toLowerCase())
+    admins: splitList_(s[8]).map(x => x.toLowerCase()),
+    taskCals: splitList_(s[9]), lastTaskSync: String(s[10] || '')
   };
 }
 
@@ -724,7 +891,7 @@ function readTasks_() {
       id: String(r[0]), proj: String(r[1]), name: String(r[2]), owner: String(r[3]), dept: String(r[4]), cat: String(r[5]),
       status: STATUSES.indexOf(r[6]) >= 0 ? r[6] : '未着手', prio: String(r[7] || ''),
       start: ymd_(r[8]), due: ymd_(r[9]), plan: num_(r[10]), actual: num_(r[11]) || 0,
-      judge: String(r[14] || ''), last: ymd_(r[15]), memo: String(r[16] || '')
+      judge: String(r[14] || ''), last: ymd_(r[15]), memo: String(r[16] || ''), calEv: String(r[17] || '')
     });
   });
   return out;

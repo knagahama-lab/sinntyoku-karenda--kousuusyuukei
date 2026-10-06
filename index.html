@@ -308,7 +308,7 @@ function cardHtml(t) {
   var od = t.due && t.status !== '完了' && t.due < S.data.today;
   return '<div class="card p-' + esc(t.prio) + '" draggable="true" data-id="' + esc(t.id) + '">' +
     '<div class="c-top"><span>' + esc(t.id) + (t.cat ? ' ・ ' + esc(t.cat) : '') + '</span>' + (t.judge ? '<span class="badge ' + jcls(t.judge) + '">' + esc(t.judge) + '</span>' : '') + '</div>' +
-    '<div class="c-name">' + esc(t.name) + '</div>' +
+    '<div class="c-name">' + (t.calEv ? '<span title="タスク用カレンダーから自動追加">📅 </span>' : '') + esc(t.name) + '</div>' +
     '<div class="c-meta">' + esc(t.proj || '（案件なし）') + ' ・ ' + esc(t.owner || '未割当') + '</div>' +
     (t.plan ? '<div class="bar"><i class="' + bc + '" style="width:' + Math.min(100, Math.round(rate * 100)) + '%"></i></div>' : '') +
     '<div class="c-foot">実績 ' + h1(t.actual) + 'h' + (t.plan ? ' / 予定 ' + h1(t.plan) + 'h' : '') +
@@ -643,6 +643,11 @@ function renderAdmin(d) {
   if (!d.isAdmin) { $('#adminBody').innerHTML = '<p class="hint">管理者のみ利用できます。</p>'; return; }
   var html = '<div class="info"><b>メンバー側の準備（各自1回だけ）</b>：Googleカレンダー →「設定と共有」→「特定のユーザーまたはグループと共有する」で <b>' + esc(d.owner) + '</b> を追加し、権限を<b>「予定の変更」</b>にしてください。<br>' +
     '閲覧・集計だけなら「予定の詳細をすべて表示」でもOKです。登録すると自動で接続テストを行い、アクセス状況が表示されます。</div>';
+  html += '<div class="panel" style="margin-bottom:14px"><h4>タスク用カレンダー（予定を入れると自動でタスクに追加）</h4>' +
+    '<div class="addrow"><input type="text" id="tcIds" size="60" placeholder="カレンダーID（例：xxxx@group.calendar.google.com）複数はカンマ区切り" value="' + esc(d.taskCals) + '">' +
+    '<button class="pri" id="tcSave">保存して同期</button><button class="sec" id="tcRun"' + (d.taskCals ? '' : ' disabled') + '>今すぐ同期</button></div>' +
+    '<p class="hint">自動同期：' + (d.taskTrigger ? '<b style="color:var(--ok)">ON</b>' : '<b>OFF</b>（保存すると自動でONになります）') + '　最終同期：' + esc(d.lastTaskSync || '未実行') + '</p>' +
+    '<p class="hint">カレンダー側が正：タスク名・開始日・期限・案件（件名の @案件名）。システム側が正：ステータス・予定工数（説明に「工数：3」と書けば初期値に）・担当者（主催者／参加者のメールが登録メンバーなら自動）。件名の先頭に ✅ を付けるか予定を削除すると「完了」になります。この予定に使った時間は、担当者のカレンダーから自動でこのタスクの実績になります。</p></div>';
   html += '<div class="panel"><h4 id="aTitle">メンバーを登録</h4><div class="addrow"><input type="text" id="aName" placeholder="氏名" size="10">' +
     '<select id="aDept">' + opts(d.depts.filter(Boolean), d.depts[0]) + '</select>' +
     '<input type="text" id="aMail" placeholder="メールアドレス（Googleアカウント）" size="32">' +
@@ -663,6 +668,15 @@ function renderAdmin(d) {
       .catch(function (e) { fail(e); btn.disabled = false; });
   };
   $('#aCancel').onclick = function () { renderAdmin(S.admin); };
+  var tcDone = function (r) { toast(r.msg.split(String.fromCharCode(10))[0]); renderAdmin(r.data); refreshAppData(); };
+  $('#tcSave').onclick = function () {
+    var btn = this; btn.disabled = true; btn.textContent = '同期中…';
+    api('saveTaskCalendars', $('#tcIds').value).then(tcDone).catch(function (e) { fail(e); btn.disabled = false; btn.textContent = '保存して同期'; });
+  };
+  $('#tcRun').onclick = function () {
+    var btn = this; btn.disabled = true; btn.textContent = '同期中…';
+    api('runTaskSync').then(tcDone).catch(function (e) { fail(e); btn.disabled = false; btn.textContent = '今すぐ同期'; });
+  };
 }
 function initAdminEvents() {
   $('#adminBody').addEventListener('click', function (e) {
